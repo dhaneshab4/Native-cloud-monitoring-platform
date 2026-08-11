@@ -65,12 +65,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # Mounted at the real runtime path, not a scratch dir: prometheus.yml
+      # references /etc/prometheus/alerts.yml absolutely, so validating anywhere
+      # else silently checks a different layout than the one that ships.
       - name: promtool check
         run: |
-          docker run --rm -v "$PWD/deploy:/cfg" --entrypoint promtool \
-            prom/prometheus:v3.1.0 check config /cfg/prometheus.yml
-          docker run --rm -v "$PWD/deploy:/cfg" --entrypoint promtool \
-            prom/prometheus:v3.1.0 check rules /cfg/alerts.yml
+          docker run --rm -v "$PWD/deploy:/etc/prometheus:ro" --entrypoint promtool \
+            prom/prometheus:v3.1.0 check config /etc/prometheus/prometheus.yml
+          docker run --rm -v "$PWD/deploy:/etc/prometheus:ro" --entrypoint promtool \
+            prom/prometheus:v3.1.0 check rules /etc/prometheus/alerts.yml
 
   # --------------------------------------------------------------- manifests
   validate-manifests:
