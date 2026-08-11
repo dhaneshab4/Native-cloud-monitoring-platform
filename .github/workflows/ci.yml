@@ -245,23 +245,58 @@ jobs:
           echo "container never became healthy"
           docker compose logs
           exit 1
+      - name: Wait for Prometheus to be ready
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:9090/-/ready >/dev/null 2>&1; then
+              echo "prometheus ready after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::prometheus never became ready"
+          docker compose logs --no-color prometheus | tail -50
+          exit 1
+
+      # The query is passed through --data-urlencode rather than pasted into the
+      # URL: it contains {, } and quotes, which are not valid unencoded in a
+      # query string. Parsing the JSON beats grepping it — an empty result set
+      # and a result of 0 are different states and should not look alike.
       - name: Prometheus is scraping the app
         run: |
-          query='http://localhost:9090/api/v1/query?query=up{job="monitoring-app"}'
+          for i in $(seq 1 40); do
+            value=$(curl -sS -G http://localhost:9090/api/v1/query \
+                      --data-urlencode 'query=up{job="monitoring-app"}' \
+                    | python3 -c 'import json,sys; r=json.load(sys.stdin)["data"]["result"]; print(r[0]["value"][1] if r else "")' \
+                    2>/dev/null || true)
+            if [ "$value" = "1" ]; then
+              echo "target up after $((i * 3))s"
+              exit 0
+            fi
+            sleep 3
+          done
+          echo "::error::prometheus never reported the target as up"
+          echo "--- active targets ---"
+          curl -sS http://localhost:9090/api/v1/targets | python3 -m json.tool || true
+          echo "--- prometheus logs ---"
+          docker compose logs --no-color prometheus | tail -60
+          echo "--- app logs ---"
+          docker compose logs --no-color app | tail -60
+          echo "--- compose ps ---"
+          docker compose ps -a
+          exit 1
+      - name: Grafana is serving
+        run: |
           for i in $(seq 1 30); do
-            up=$(curl -fsS "$query" | grep -o '"value":\[[^]]*,"1"\]' || true)
-            if [ -n "$up" ]; then
-              echo "target is up after $((i * 2))s"
+            if curl -fsS http://localhost:3000/api/health | grep -q '"database"'; then
+              echo "grafana healthy after ${i}s"
               exit 0
             fi
             sleep 2
           done
-          echo "prometheus never saw the target as up"
-          curl -s http://localhost:9090/api/v1/targets
+          echo "::error::grafana never reported healthy"
+          docker compose logs --no-color grafana | tail -40
           exit 1
-      - name: Grafana is serving
-        run: |
-          curl -fsS http://localhost:3000/api/health | grep -q '"database"'
       - name: Tear down
         if: always()
         run: docker compose down -v
