@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cloud Native Monitoring</title>
+<style>
+  :root{
+    --bg:#0b1020; --panel:#151b31; --line:#243050; --text:#e8ecf7;
+    --muted:#93a0c0; --ok:#2ecc8f; --warn:#f0a02f; --bad:#ef5b6b; --accent:#5b8cff;
+  }
+  @media (prefers-color-scheme: light){
+    :root{ --bg:#f5f7fc; --panel:#ffffff; --line:#dde3f0; --text:#131a2b; --muted:#5a6784; }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);
+       font:15px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  .wrap{max-width:1080px;margin:0 auto;padding:24px 16px 48px}
+  header{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;
+         margin-bottom:20px}
+  h1{font-size:20px;margin:0;letter-spacing:-.01em}
+  .sub{color:var(--muted);font-size:13px;margin-top:2px}
+  .pill{padding:5px 12px;border-radius:999px;font-size:13px;font-weight:600;
+        border:1px solid transparent}
+  .pill.healthy{background:color-mix(in srgb,var(--ok) 16%,transparent);color:var(--ok);
+                border-color:color-mix(in srgb,var(--ok) 35%,transparent)}
+  .pill.degraded{background:color-mix(in srgb,var(--bad) 16%,transparent);color:var(--bad);
+                 border-color:color-mix(in srgb,var(--bad) 35%,transparent)}
+  .grid{display:grid;gap:14px;grid-template-columns:repeat(auto-fit,minmax(240px,1fr))}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px}
+  .label{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.06em}
+  .value{font-size:30px;font-weight:650;margin:6px 0 10px;font-variant-numeric:tabular-nums}
+  .bar{height:8px;border-radius:99px;background:var(--line);overflow:hidden}
+  .bar > i{display:block;height:100%;border-radius:99px;background:var(--ok);
+           transition:width .3s ease,background .3s ease}
+  .bar > i.warn{background:var(--warn)} .bar > i.bad{background:var(--bad)}
+  .foot{color:var(--muted);font-size:12px;margin-top:8px}
+  table{width:100%;border-collapse:collapse;margin-top:6px}
+  td{padding:6px 0;border-bottom:1px solid var(--line);font-size:13px}
+  td:last-child{text-align:right;color:var(--muted);font-variant-numeric:tabular-nums}
+  tr:last-child td{border-bottom:0}
+  .alerts{margin-top:16px;border-left:3px solid var(--bad);
+          background:color-mix(in srgb,var(--bad) 10%,transparent);
+          padding:10px 14px;border-radius:0 8px 8px 0;font-size:14px}
+  .links{margin-top:22px;display:flex;gap:14px;flex-wrap:wrap;font-size:13px}
+  .links a{color:var(--accent);text-decoration:none}
+  .links a:hover{text-decoration:underline}
+  @media (prefers-reduced-motion: reduce){ .bar > i{transition:none} }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Cloud Native Monitoring</h1>
+      <div class="sub">{{ info.hostname }} · {{ info.platform }} · {{ info.cpu_count }} vCPU</div>
+    </div>
+    <span id="status" class="pill {{ snapshot.status }}">{{ snapshot.status }}</span>
+  </header>
+
+  <div class="grid">
+    <div class="card">
+      <div class="label">CPU</div>
+      <div class="value"><span id="cpu">{{ snapshot.cpu_percent }}</span>%</div>
+      <div class="bar"><i id="cpu-bar" style="width:{{ snapshot.cpu_percent }}%"></i></div>
+      <div class="foot">warn at {{ thresholds.cpu }}%</div>
+    </div>
+    <div class="card">
+      <div class="label">Memory</div>
+      <div class="value"><span id="mem">{{ snapshot.memory_percent }}</span>%</div>
+      <div class="bar"><i id="mem-bar" style="width:{{ snapshot.memory_percent }}%"></i></div>
+      <div class="foot">warn at {{ thresholds.memory }}%</div>
+    </div>
+    <div class="card">
+      <div class="label">Disk ({{ snapshot.disk_path }})</div>
+      <div class="value"><span id="disk">{{ snapshot.disk_percent }}</span>%</div>
+      <div class="bar"><i id="disk-bar" style="width:{{ snapshot.disk_percent }}%"></i></div>
+      <div class="foot">warn at {{ thresholds.disk }}%</div>
+    </div>
+    <div class="card">
+      <div class="label">System</div>
+      <table>
+        <tr><td>Load 1m / 5m / 15m</td>
+            <td id="load">{{ snapshot.load_1m }} / {{ snapshot.load_5m }} / {{ snapshot.load_15m }}</td></tr>
+        <tr><td>Processes</td><td id="procs">{{ snapshot.process_count }}</td></tr>
+        <tr><td>Host uptime</td><td id="uptime">{{ (snapshot.uptime_seconds / 3600) | round(1) }} h</td></tr>
+      </table>
+    </div>
+  </div>
+
+  <div id="alerts" class="alerts" {% if not snapshot.breaches %}hidden{% endif %}>
+    <strong>Threshold breached:</strong> <span id="alert-text">{{ snapshot.breaches | join('; ') }}</span>
+  </div>
+
+  <div class="links">
+    <a href="/api/metrics">/api/metrics</a>
+    <a href="/metrics">/metrics</a>
+    <a href="/healthz">/healthz</a>
+    <a href="/readyz">/readyz</a>
+  </div>
+</div>
+
+<script>
+  const INTERVAL = {{ interval_ms }};
+  const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+  const bar = (id, pct, warn) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.style.width = Math.min(pct, 100) + '%';
+    el.className = pct >= warn ? 'bad' : pct >= warn * 0.75 ? 'warn' : '';
+  };
+  const T = {{ thresholds | tojson }};
+
+  async function tick() {
+    try {
+      const r = await fetch('/api/metrics', { cache: 'no-store' });
+      const d = await r.json();
+      set('cpu', d.cpu_percent);   bar('cpu-bar', d.cpu_percent, T.cpu);
+      set('mem', d.memory_percent); bar('mem-bar', d.memory_percent, T.memory);
+      set('disk', d.disk_percent);  bar('disk-bar', d.disk_percent, T.disk);
+      set('load', `${d.load_1m} / ${d.load_5m} / ${d.load_15m}`);
+      set('procs', d.process_count);
+      set('uptime', (d.uptime_seconds / 3600).toFixed(1) + ' h');
+
+      const pill = document.getElementById('status');
+      pill.textContent = d.status;
+      pill.className = 'pill ' + d.status;
+
+      const alerts = document.getElementById('alerts');
+      alerts.hidden = d.breaches.length === 0;
+      set('alert-text', d.breaches.join('; '));
+    } catch (e) {
+      console.error('metrics poll failed', e);
+    }
+  }
+  setInterval(tick, INTERVAL);
+  tick();
+</script>
+</body>
+</html>

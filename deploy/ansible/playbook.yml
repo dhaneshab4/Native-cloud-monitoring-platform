@@ -1,0 +1,83 @@
+# Provisions a Debian/Ubuntu host to run the app under systemd.
+#   ansible-playbook -i inventory.ini playbook.yml
+---
+- name: Deploy cloud native monitoring app
+  hosts: monitoring
+  become: true
+
+  vars:
+    app_dir: /opt/monitoring-app
+    app_user: monitoring
+    repo_url: https://github.com/dhaneshab4/CI-CD-pipeline.git
+    repo_version: main
+
+  tasks:
+    - name: Install system packages
+      ansible.builtin.apt:
+        name: [python3, python3-venv, python3-pip, git]
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Create the service account
+      ansible.builtin.user:
+        name: "{{ app_user }}"
+        system: true
+        create_home: false
+        shell: /usr/sbin/nologin
+
+    - name: Check out the application
+      ansible.builtin.git:
+        repo: "{{ repo_url }}"
+        dest: "{{ app_dir }}"
+        version: "{{ repo_version }}"
+      notify: Restart monitoring-app
+
+    - name: Create the virtualenv and install dependencies
+      ansible.builtin.pip:
+        requirements: "{{ app_dir }}/requirements.txt"
+        virtualenv: "{{ app_dir }}/.venv"
+        virtualenv_command: python3 -m venv
+      notify: Restart monitoring-app
+
+    - name: Own the application directory
+      ansible.builtin.file:
+        path: "{{ app_dir }}"
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+        recurse: true
+
+    - name: Install the systemd unit
+      ansible.builtin.copy:
+        src: ../monitoring-app.service
+        dest: /etc/systemd/system/monitoring-app.service
+        mode: "0644"
+      notify:
+        - Reload systemd
+        - Restart monitoring-app
+
+    - name: Enable and start the service
+      ansible.builtin.systemd:
+        name: monitoring-app
+        enabled: true
+        state: started
+        daemon_reload: true
+
+    - name: Wait for the readiness endpoint
+      ansible.builtin.uri:
+        url: http://127.0.0.1:5000/readyz
+        status_code: 200
+      register: probe
+      retries: 10
+      delay: 3
+      until: probe.status == 200
+
+  handlers:
+    - name: Reload systemd
+      ansible.builtin.systemd:
+        daemon_reload: true
+
+    - name: Restart monitoring-app
+      ansible.builtin.systemd:
+        name: monitoring-app
+        state: restarted

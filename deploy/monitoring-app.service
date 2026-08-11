@@ -1,0 +1,47 @@
+# systemd unit for bare-metal / VM deployment without a container runtime.
+#
+#   sudo useradd --system --no-create-home --shell /usr/sbin/nologin monitoring
+#   sudo cp deploy/monitoring-app.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now monitoring-app
+#   journalctl -u monitoring-app -f
+
+[Unit]
+Description=Cloud native monitoring app
+Documentation=https://github.com/dhaneshab4/CI-CD-pipeline
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=monitoring
+Group=monitoring
+WorkingDirectory=/opt/monitoring-app
+Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=-/etc/monitoring-app/env
+ExecStart=/opt/monitoring-app/.venv/bin/gunicorn \
+    --bind 0.0.0.0:5000 --workers 2 --threads 4 \
+    --access-logfile - --error-logfile - app.main:app
+ExecReload=/bin/kill -s HUP $MAINPID
+Restart=always
+RestartSec=5
+TimeoutStopSec=20
+
+# Hardening: the service reads /proc for metrics but needs nothing else.
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+
+[Install]
+WantedBy=multi-user.target

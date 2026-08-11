@@ -1,8 +1,61 @@
-version: '3.4'
+# Full local stack: the app, a Prometheus that scrapes it, and a Grafana
+# pre-provisioned to read from that Prometheus. `docker compose up` gives a
+# working dashboard with no manual clicking.
 
 services:
-  cloudnativemonitoringapplication:
-    image: cloudnativemonitoringapplication
+  app:
     build:
       context: .
-      dockerfile: ./Dockerfile
+      target: runtime
+    image: ghcr.io/dhaneshab4/cloud-native-monitoring-app:local
+    container_name: monitoring-app
+    ports: ["5000:5000"]
+    environment:
+      CPU_WARN_PERCENT: "${CPU_WARN_PERCENT:-80}"
+      MEM_WARN_PERCENT: "${MEM_WARN_PERCENT:-80}"
+      DISK_WARN_PERCENT: "${DISK_WARN_PERCENT:-85}"
+      LOG_LEVEL: "${LOG_LEVEL:-INFO}"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1:5000/readyz',timeout=2)"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    security_opt: ["no-new-privileges:true"]
+    read_only: true
+    tmpfs: ["/tmp"]
+
+  prometheus:
+    image: prom/prometheus:v3.1.0
+    container_name: monitoring-prometheus
+    ports: ["9090:9090"]
+    volumes:
+      - ./deploy/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./deploy/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prom_data:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=7d
+      - --web.enable-lifecycle
+    depends_on:
+      app: {condition: service_healthy}
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.4.0
+    container_name: monitoring-grafana
+    ports: ["3000:3000"]
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_PASSWORD:-admin}"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+    volumes:
+      - ./deploy/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana_data:/var/lib/grafana
+    depends_on: [prometheus]
+    restart: unless-stopped
+
+volumes:
+  prom_data: {}
+  grafana_data: {}

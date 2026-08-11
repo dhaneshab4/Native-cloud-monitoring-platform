@@ -1,1 +1,4 @@
-# To ensure app dependencies are ported from your virtual environment/host machine into your container, run 'pip freeze > requirements.txt' in the terminal to overwrite this file
+flask==3.1.0
+psutil==6.1.1
+prometheus-client==0.21.1
+gunicorn==23.0.0

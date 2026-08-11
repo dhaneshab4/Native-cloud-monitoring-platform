@@ -1,0 +1,38 @@
+groups:
+  - name: host-resources
+    rules:
+      - alert: HighCPU
+        expr: system_cpu_percent > 80
+        for: 2m
+        labels: {severity: warning}
+        annotations:
+          summary: "CPU above 80% for 2 minutes"
+          description: "CPU is at {{ $value | printf \"%.1f\" }}%."
+
+      - alert: HighMemory
+        expr: system_memory_percent > 80
+        for: 2m
+        labels: {severity: warning}
+        annotations:
+          summary: "Memory above 80% for 2 minutes"
+
+      - alert: DiskAlmostFull
+        expr: system_disk_percent > 85
+        for: 5m
+        labels: {severity: critical}
+        annotations:
+          summary: "Disk above 85% on {{ $labels.path }}"
+
+      - alert: ServiceDegraded
+        expr: system_status == 0
+        for: 1m
+        labels: {severity: warning}
+        annotations:
+          summary: "Application reports degraded status"
+
+      - alert: TargetDown
+        expr: up{job="monitoring-app"} == 0
+        for: 1m
+        labels: {severity: critical}
+        annotations:
+          summary: "Prometheus cannot scrape the monitoring app"
