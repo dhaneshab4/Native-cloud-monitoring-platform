@@ -72,15 +72,33 @@ jobs:
           docker run --rm -v "$PWD/deploy:/cfg" --entrypoint promtool \
             prom/prometheus:v3.1.0 check rules /cfg/alerts.yml
 
+  # --------------------------------------------------------------- manifests
+  validate-manifests:
+    name: Validate Kubernetes manifests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: kubeconform
+        run: |
+          curl -sSLo kubeconform.tar.gz \
+            https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz
+          tar xf kubeconform.tar.gz kubeconform
+          # ServiceMonitor is a CRD, so pull the operator schemas too.
+          ./kubeconform -strict -summary \
+            -schema-location default \
+            -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
+            deploy/k8s/
+
   # -------------------------------------------------------------------- build
   build:
     name: Build image
     runs-on: ubuntu-latest
-    needs: [lint, test, validate-config]
+    needs: [lint, test, validate-config, validate-manifests]
     permissions:
       contents: read
       packages: write
       security-events: write
+      id-token: write   # cosign keyless signing via OIDC
     steps:
       - uses: actions/checkout@v4
 
@@ -153,6 +171,7 @@ jobs:
           sarif_file: trivy.sarif
 
       - name: Push
+        id: push
         if: github.event_name != 'pull_request'
         uses: docker/build-push-action@v6
         with:
@@ -164,6 +183,42 @@ jobs:
           platforms: linux/amd64,linux/arm64
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # -------------------------------------------------- supply chain
+      # Sign the digest, not a tag: tags are mutable and can be repointed at
+      # a different image after the signature is made.
+      - name: Install cosign
+        if: github.event_name != 'pull_request'
+        uses: sigstore/cosign-installer@v3
+
+      - name: Sign the image (keyless, OIDC)
+        if: github.event_name != 'pull_request'
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: cosign sign --yes "${REGISTRY}/${IMAGE_NAME}@${DIGEST}"
+
+      - name: Generate SBOM
+        if: github.event_name != 'pull_request'
+        uses: anchore/sbom-action@v0
+        with:
+          image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}@${{ steps.push.outputs.digest }}
+          format: spdx-json
+          output-file: sbom.spdx.json
+
+      - name: Attest the SBOM to the image
+        if: github.event_name != 'pull_request'
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          cosign attest --yes --predicate sbom.spdx.json --type spdxjson \
+            "${REGISTRY}/${IMAGE_NAME}@${DIGEST}"
+
+      - name: Publish the SBOM as a build artifact
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: sbom.spdx.json
 
   # ------------------------------------------------------------ stack up-test
   integration:

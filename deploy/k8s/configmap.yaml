@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: monitoring-app-config
+  namespace: monitoring
+data:
+  CPU_WARN_PERCENT: "80"
+  MEM_WARN_PERCENT: "80"
+  DISK_WARN_PERCENT: "85"
+  LOG_LEVEL: "INFO"

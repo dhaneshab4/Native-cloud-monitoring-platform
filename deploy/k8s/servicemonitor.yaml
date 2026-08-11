@@ -1,0 +1,17 @@
+# For clusters running the Prometheus Operator. Without the operator installed
+# this is inert, so it is safe to apply either way.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: monitoring-app
+  namespace: monitoring
+  labels:
+    app.kubernetes.io/name: monitoring-app
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: monitoring-app
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 15s

@@ -5,7 +5,7 @@
 A small Python service that reports host metrics over HTTP, JSON and Prometheus,
 plus the pipeline and deployment machinery around it. The service is deliberately
 simple; the point of the repository is everything else — the multi-stage image,
-the CI/CD pipeline, the observability stack and the two deployment paths.
+the CI/CD pipeline, the observability stack and the three deployment paths.
 
 ```
                   ┌──────────────┐   scrape /metrics   ┌──────────────┐
@@ -86,14 +86,15 @@ production.
 
 ## The pipeline
 
-`.github/workflows/ci.yml` — five jobs, gated in that order.
+`.github/workflows/ci.yml` — six jobs, gated in that order.
 
 | Job | What it does |
 | --- | --- |
 | **lint** | `ruff check` and `ruff format --check` |
 | **test** | pytest across Python 3.11, 3.12 and 3.13, coverage floor 90% |
 | **validate-config** | `promtool check config` and `check rules` — a broken alert rule fails the build, not the on-call |
-| **build** | Buildx with GHA layer cache → **load locally and smoke-test first** → Trivy scan (SARIF to the Security tab) → only then push multi-arch amd64/arm64 to GHCR |
+| **validate-manifests** | `kubeconform -strict` over `deploy/k8s/`, with CRD schemas so the ServiceMonitor is checked too |
+| **build** | Buildx with GHA layer cache → **load locally and smoke-test first** → Trivy scan (SARIF to the Security tab) → multi-arch push to GHCR → cosign signature and SBOM attestation |
 | **integration** | Brings the whole Compose stack up, waits for the container to report *healthy*, asserts Prometheus actually has the target `up`, checks Grafana's health endpoint |
 
 Two details worth calling out:
@@ -108,12 +109,43 @@ started. `docker compose up` succeeding proves very little; querying
 
 Concurrency is set so a second push to a branch cancels the first.
 
+### Supply chain
+
+Every pushed image is signed with **cosign** using keyless OIDC — no private key
+to store or rotate — and an **SPDX SBOM** is generated and attested to the same
+image.
+
+Both operate on the **digest**, not a tag. Tags are mutable: a tag signed today
+can be repointed at a different image tomorrow, and the signature would still
+appear valid. The digest cannot.
+
+```bash
+cosign verify ghcr.io/dhaneshab4/cloud-native-monitoring-app:latest \
+  --certificate-identity-regexp 'https://github.com/dhaneshab4/CI-CD-pipeline/.*' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
+Dependabot watches pip, Docker base images and the Actions themselves, grouped
+so it opens one PR per ecosystem rather than a dozen.
+
 ## Deployment
 
-Two paths, both in `deploy/`.
+Three paths, all in `deploy/`.
 
 **Containers** — `docker compose up -d`. Prometheus and Grafana are provisioned
-from files, so the datasource is wired up with no manual clicking.
+from files — datasource *and* a ten-panel dashboard — so the stack comes up with
+graphs already drawn and nothing to click.
+
+**Kubernetes** — `kubectl apply -k deploy/k8s/`. Two replicas, `maxUnavailable: 0`
+so a rollout never drops below the current count, a PodDisruptionBudget, resource
+requests and limits, and a locked-down `securityContext` (non-root, read-only
+root filesystem, all capabilities dropped, `RuntimeDefault` seccomp).
+
+The three probes do different jobs: `startupProbe` gives a slow start up to 60s
+without a lenient liveness threshold, `livenessProbe` hits `/healthz` so a
+*degraded* pod is not killed, and `readinessProbe` hits `/readyz` so a pod that
+cannot collect metrics is pulled out of the Service instead. A `ServiceMonitor`
+is included for clusters running the Prometheus Operator; it is inert elsewhere.
 
 **Bare metal / VM** — `deploy/monitoring-app.service` is a hardened systemd unit:
 ordered after `network-online.target`, dedicated non-login service user,
@@ -138,8 +170,13 @@ scrape spike does not page anyone.
 ```
 app/            config.py  metrics.py  main.py  templates/
 tests/          22 tests — API contracts, collection, config failure modes
-deploy/         prometheus.yml  alerts.yml  grafana/  monitoring-app.service  ansible/
-.github/        workflows/ci.yml
+deploy/
+  prometheus.yml  alerts.yml        scrape config and five alert rules
+  grafana/                          provisioned datasource + 10-panel dashboard
+  monitoring-app.service            hardened systemd unit
+  ansible/                          host provisioning playbook
+  k8s/                              kustomize: deployment, service, PDB, ServiceMonitor
+.github/        workflows/ci.yml  dependabot.yml
 Dockerfile      multi-stage, non-root, healthchecked
 docker-compose.yml
 Makefile        setup lint fmt test cov run build scan up down logs clean
@@ -154,6 +191,8 @@ make cov        # tests with the 90% floor enforced
 make fmt        # autoformat and autofix
 make build      # build the image
 make scan       # Trivy, HIGH and CRITICAL only
+make k8s        # kubectl apply -k deploy/k8s/
+make k8s-check  # kubeconform, the same check CI runs
 ```
 
 ## Licence

@@ -4,10 +4,10 @@ PY   := $(VENV)/bin/python
 PIP  := $(VENV)/bin/pip
 IMAGE := ghcr.io/dhaneshab4/cloud-native-monitoring-app:local
 
-.PHONY: help setup lint fmt test cov run build scan up down logs clean
+.PHONY: help setup lint fmt test cov run build scan up down logs k8s k8s-check clean
 
 help: ## Show this help
-	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
+	@grep -hE '^[a-zA-Z0-9_-]+:.*?## ' $(MAKEFILE_LIST) \
 	  | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-10s\033[0m %s\n",$$1,$$2}'
 
 setup: ## Create the virtualenv and install dev dependencies
@@ -50,6 +50,14 @@ down: ## Stop the stack and remove volumes
 
 logs: ## Follow stack logs
 	docker compose logs -f
+
+k8s: ## Apply the Kubernetes manifests
+	kubectl apply -k deploy/k8s/
+
+k8s-check: ## Validate the manifests the way CI does
+	kubeconform -strict -summary -schema-location default \
+	  -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
+	  deploy/k8s/
 
 clean: ## Remove build and test artefacts
 	rm -rf $(VENV) .pytest_cache .ruff_cache .coverage coverage.xml
