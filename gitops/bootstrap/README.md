@@ -77,6 +77,36 @@ The kind nodes need the same treatment at creation time — export `HTTP_PROXY`,
 into each node's containerd config, without which the kubelet cannot pull
 images either.
 
+**The environment variables are not sufficient on their own.** They fix image
+pulls and anything shelling out to `git`, but the repo-server reaches
+repositories through its own Go client, which does not read them. The symptom
+is confusing, because `git ls-remote` run by hand inside that very pod
+succeeds while Argo keeps reporting
+
+```
+ComparisonError: failed to list refs: ... dial tcp: lookup github.com ...
+```
+
+Argo takes the proxy per repository instead, declared on the repository secret:
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: repo-ci-cd-pipeline
+  namespace: argocd
+  labels:
+    argocd.argoproj.io/secret-type: repository
+stringData:
+  type: git
+  url: https://github.com/dhaneshab4/CI-CD-pipeline.git
+  proxy: http://<proxy-host>:<port>
+```
+
+The URL must match the `repoURL` in the Applications exactly, character for
+character, or Argo will not associate the two and silently falls back to no
+proxy.
+
 ## Verifying the GitOps loop actually works
 
 The demonstration that matters is not that it deploys, but that it *corrects*:
