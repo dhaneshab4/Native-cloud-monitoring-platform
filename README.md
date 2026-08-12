@@ -55,6 +55,7 @@ make down
 | `/api/metrics` | JSON snapshot. Returns **503** when a threshold is breached |
 | `/api/search?q=` | Semantic search over the runbooks |
 | `/api/triage` | POST an alert, get the runbooks most likely to resolve it |
+| `/api/alertmanager` | Alertmanager webhook — attaches runbooks to firing alerts |
 | `/metrics` | Prometheus exposition format |
 | `/healthz` | Liveness — is the process answering |
 | `/readyz` | Readiness — can it *actually* collect a metric |
@@ -272,6 +273,21 @@ of a document rather than the whole thing.
 entirely; below a confidence threshold, they are returned but flagged. During an
 incident a plausible wrong answer is worse than no answer, because it gets acted
 on.
+
+### Closing the loop
+
+Searching manually is still a manual step. `/api/alertmanager` is an
+Alertmanager webhook: every firing alert gets the runbook attached to it
+*before* the notification goes out, so nobody has to remember to ask.
+
+```
+alert fires → Alertmanager → /api/alertmanager → notification carries the runbook
+```
+
+`deploy/alertmanager.yml` has the routing. Resolved alerts pass through
+untouched — nobody needs a procedure for something that has stopped happening —
+and a `TargetDown` inhibit rule suppresses the resource alerts of a host that
+cannot be scraped, because those are absence of data, not signal.
 
 ### Is a transformer worth it?
 

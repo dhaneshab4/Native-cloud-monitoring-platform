@@ -103,3 +103,62 @@ def test_retrieval_metrics_are_exported(client):
         "rag_top_score",
     ):
         assert series in body
+
+
+# --------------------------------------------------- alertmanager webhook
+def _alert(name, status="firing", **annotations):
+    return {
+        "status": status,
+        "labels": {"alertname": name, "severity": "warning"},
+        "annotations": annotations,
+        "fingerprint": "abc123",
+    }
+
+
+def test_alertmanager_rejects_a_non_alertmanager_body(client):
+    assert client.post("/api/alertmanager", json={"nope": 1}).status_code == 400
+
+
+def test_alertmanager_attaches_a_runbook_to_a_firing_alert(client):
+    payload = {"version": "4", "alerts": [_alert("DiskAlmostFull", summary="Disk above 85%")]}
+    d = client.post("/api/alertmanager", json=payload).get_json()
+    assert d["received"] == 1
+    assert d["enriched"] == 1
+    alert = d["alerts"][0]
+    assert alert["alertname"] == "DiskAlmostFull"
+    assert alert["confident"] is True
+    assert alert["runbooks"][0]["doc_id"] == "disk-full"
+    assert alert["runbooks"][0]["suggested_action"]
+
+
+def test_alertmanager_leaves_resolved_alerts_alone(client):
+    payload = {"alerts": [_alert("DiskAlmostFull", status="resolved", summary="Disk above 85%")]}
+    d = client.post("/api/alertmanager", json=payload).get_json()
+    assert d["enriched"] == 0
+    assert d["alerts"][0]["runbooks"] == []
+
+
+def test_alertmanager_handles_a_batch(client):
+    payload = {
+        "alerts": [
+            _alert("HighCPU", summary="CPU above 80%"),
+            _alert("TargetDown", summary="Prometheus cannot scrape the app"),
+            _alert("HighMemory", status="resolved"),
+        ]
+    }
+    d = client.post("/api/alertmanager", json=payload).get_json()
+    assert d["received"] == 3
+    assert d["enriched"] == 2
+    assert {a["alertname"] for a in d["alerts"]} == {"HighCPU", "TargetDown", "HighMemory"}
+
+
+def test_alertmanager_tolerates_a_malformed_entry(client):
+    payload = {"alerts": ["not a dict", _alert("HighCPU", summary="CPU above 80%")]}
+    d = client.post("/api/alertmanager", json=payload).get_json()
+    assert d["enriched"] == 1
+
+
+def test_dashboard_shows_the_search_panel(client):
+    html = client.get("/").data.decode()
+    assert "Runbook search" in html
+    assert 'id="search-form"' in html

@@ -102,6 +102,64 @@ def create_app() -> Flask:
         detail = str(body.get("detail", ""))
         return jsonify(searcher.triage(alert, detail))
 
+    @app.post("/api/alertmanager")
+    def api_alertmanager() -> Response:
+        """Alertmanager webhook: attach the likely runbook to every firing alert.
+
+        This is the point of the whole feature. Triage is only useful if it
+        happens without anyone remembering to ask for it, so the same retrieval
+        runs automatically the moment an alert fires and the result travels with
+        the notification.
+
+        Resolved alerts are passed through untouched — nobody needs a runbook
+        for something that has stopped happening.
+        """
+        if searcher is None:
+            return jsonify(error="search index unavailable"), 503
+
+        payload = request.get_json(silent=True)
+        if not isinstance(payload, dict) or not isinstance(payload.get("alerts"), list):
+            return jsonify(error="expected an Alertmanager payload with an 'alerts' list"), 400
+
+        enriched = []
+        for alert in payload["alerts"]:
+            if not isinstance(alert, dict):
+                continue
+            labels = alert.get("labels") or {}
+            annotations = alert.get("annotations") or {}
+            name = str(labels.get("alertname", "")).strip()
+            entry = {
+                "alertname": name,
+                "status": alert.get("status"),
+                "severity": labels.get("severity"),
+                "fingerprint": alert.get("fingerprint"),
+            }
+            if alert.get("status") == "resolved" or not name:
+                entry["runbooks"] = []
+                entry["confident"] = False
+            else:
+                detail = " ".join(
+                    str(annotations.get(k, "")) for k in ("summary", "description")
+                ).strip()
+                result = searcher.triage(name, detail, k=2)
+                entry["confident"] = result["confident"]
+                entry["runbooks"] = [
+                    {
+                        "doc_id": r["doc_id"],
+                        "title": r["title"],
+                        "score": r["score"],
+                        "suggested_action": r["suggested_action"],
+                    }
+                    for r in result["runbooks"]
+                ]
+            enriched.append(entry)
+
+        return jsonify(
+            received=len(payload["alerts"]),
+            enriched=sum(1 for e in enriched if e["runbooks"]),
+            alerts=enriched,
+        )
+
     @app.get("/metrics")
     def metrics() -> Response:
         return Response(prometheus_payload(), mimetype="text/plain; version=0.0.4")

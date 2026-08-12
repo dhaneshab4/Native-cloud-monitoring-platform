@@ -1,0 +1,45 @@
+# Alertmanager routes every firing alert through the app's webhook, which
+# attaches the runbook most likely to resolve it before the notification is
+# delivered.
+#
+# Not wired into docker-compose.yml by default: the compose stack is the
+# demo path and does not need a notification layer to be useful. Point a real
+# Alertmanager at this file to close the loop.
+#
+#   docker run --rm -p 9093:9093 \
+#     -v "$PWD/deploy/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro" \
+#     prom/alertmanager:v0.28.0
+
+global:
+  resolve_timeout: 5m
+
+route:
+  receiver: runbook-enriched
+  group_by: [alertname, severity]
+  group_wait: 30s
+  group_interval: 5m
+  # Long enough not to nag, short enough that an unattended critical alert is
+  # seen again within a shift.
+  repeat_interval: 4h
+
+  routes:
+    - matchers: [severity="critical"]
+      receiver: runbook-enriched
+      repeat_interval: 1h
+
+receivers:
+  - name: runbook-enriched
+    webhook_configs:
+      # send_resolved is on so the loop closes visibly; the app returns resolved
+      # alerts untouched rather than attaching a runbook to something that has
+      # stopped happening.
+      - url: http://app:5000/api/alertmanager
+        send_resolved: true
+        max_alerts: 0
+
+inhibit_rules:
+  # A target that cannot be scraped produces no resource metrics, so its
+  # resource alerts are noise rather than signal.
+  - source_matchers: [alertname="TargetDown"]
+    target_matchers: [severity="warning"]
+    equal: [job]

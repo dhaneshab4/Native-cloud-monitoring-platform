@@ -69,6 +69,7 @@ def evaluate(backend_name: str, cases: list[dict]) -> dict:
     ranks: list[int | None] = []
     latencies: list[float] = []
     failures: list[dict] = []
+    retrieved_per_case: list[list[str]] = []
 
     for case in cases:
         start = time.perf_counter()
@@ -81,6 +82,7 @@ def evaluate(backend_name: str, cases: list[dict]) -> dict:
             if hit.doc_id not in ordered:
                 ordered.append(hit.doc_id)
 
+        retrieved_per_case.append(ordered[:MAX_K])
         rank = ordered.index(case["expect"]) + 1 if case["expect"] in ordered else None
         ranks.append(rank)
         if rank is None or rank > 3:
@@ -92,6 +94,13 @@ def evaluate(backend_name: str, cases: list[dict]) -> dict:
                     "got": ordered[:3],
                 }
             )
+
+    # Which runbooks never surface for any query? Either nobody would ever ask
+    # for them, or they are written in language no one uses. Both are content
+    # problems the retrieval numbers alone will not show.
+    retrieved = {d for hit_ids in retrieved_per_case for d in hit_ids}
+    all_docs = {c.doc_id for c in index.chunks}
+    unreachable = sorted(all_docs - retrieved)
 
     total = len(cases)
     recall = {
@@ -109,6 +118,7 @@ def evaluate(backend_name: str, cases: list[dict]) -> dict:
         "latency_ms_mean": round(statistics.mean(latencies), 3),
         "latency_ms_median": round(statistics.median(latencies), 3),
         "latency_ms_p95": round(_percentile(latencies, 0.95), 3),
+        "unreachable_runbooks": unreachable,
         "failures": failures,
     }
 
@@ -125,6 +135,8 @@ def render(result: dict) -> str:
         f"latency med/mean/p95  {result['latency_ms_median']:.2f} / "
         f"{result['latency_ms_mean']:.2f} / {result['latency_ms_p95']:.2f} ms",
     ]
+    if result["unreachable_runbooks"]:
+        lines.append("\nnever retrieved by any query: " + ", ".join(result["unreachable_runbooks"]))
     if result["failures"]:
         lines.append(f"\nmissed the top 3 ({len(result['failures'])}):")
         for f in result["failures"]:
