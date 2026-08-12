@@ -52,3 +52,54 @@ def test_unknown_route_is_json_404(client):
     r = client.get("/nope")
     assert r.status_code == 404
     assert r.get_json()["error"] == "not found"
+
+
+# ------------------------------------------------------- runbook search API
+def test_search_requires_a_query(client):
+    r = client.get("/api/search")
+    assert r.status_code == 400
+    assert "q" in r.get_json()["error"]
+
+
+def test_search_returns_ranked_results(client):
+    d = client.get("/api/search?q=no+space+left+on+device&k=3").get_json()
+    assert d["count"] >= 1
+    assert d["results"][0]["doc_id"] == "disk-full"
+    assert "excerpt" in d["results"][0]
+
+
+def test_search_rejects_a_non_integer_k(client):
+    assert client.get("/api/search?q=disk&k=lots").status_code == 400
+
+
+def test_search_clamps_k(client):
+    d = client.get("/api/search?q=disk&k=9999").get_json()
+    assert d["count"] <= 20
+
+
+def test_triage_requires_an_alert(client):
+    r = client.post("/api/triage", json={})
+    assert r.status_code == 400
+
+
+def test_triage_ranks_the_matching_runbook_first(client):
+    d = client.post("/api/triage", json={"alert": "DiskAlmostFull"}).get_json()
+    assert d["confident"] is True
+    assert d["runbooks"][0]["doc_id"] == "disk-full"
+
+
+def test_triage_declines_to_guess(client):
+    d = client.post("/api/triage", json={"alert": "xyzzy plugh frobnicate"}).get_json()
+    assert d["confident"] is False
+
+
+def test_retrieval_metrics_are_exported(client):
+    client.get("/api/search?q=disk")
+    body = client.get("/metrics").data.decode()
+    for series in (
+        "rag_queries_total",
+        "rag_query_duration_seconds",
+        "rag_index_documents",
+        "rag_top_score",
+    ):
+        assert series in body

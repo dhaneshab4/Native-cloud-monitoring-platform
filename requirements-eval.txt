@@ -1,0 +1,5 @@
+# Only for comparing embedding backends in eval/. Deliberately separate:
+# this pulls torch, which is roughly two orders of magnitude larger than the
+# entire runtime image and has no business being in it.
+-r requirements-dev.txt
+sentence-transformers==5.7.0

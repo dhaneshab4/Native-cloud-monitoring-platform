@@ -7,11 +7,19 @@ __pycache__
 *.pyc
 .coverage
 coverage.xml
-deploy
 tests
+eval
+data
 Makefile
-README.md
 LICENSE
 docker-compose*.yml
 requirements-dev.txt
+requirements-eval.txt
+ruff.toml
+pytest.ini
 *.md
+
+# The runbooks are the search corpus and the builder stage indexes them, so
+# they have to survive the *.md exclusion above. Order matters here: a later
+# negation re-includes what an earlier pattern removed.
+!deploy/runbooks/*.md

@@ -8,7 +8,7 @@ CLUSTER   := monitoring
 CHART     := charts/monitoring-app
 TF_DEV    := infra/terraform/envs/dev
 
-.PHONY: help setup lint fmt test cov run build scan up down logs k8s k8s-check clean \
+.PHONY: help setup setup-eval lint fmt test cov index eval eval-compare eval-plot run build scan up down logs k8s k8s-check clean \
         tools kind-up kind-down argo-install argo-password argo-ui \
         helm-lint helm-render helm-diff platform selfheal rollout-watch \
         tf-init tf-plan tf-apply tf-destroy tf-fmt verify
@@ -22,19 +22,34 @@ setup: ## Create the virtualenv and install dev dependencies
 	$(PIP) install --upgrade pip
 	$(PIP) install -r requirements-dev.txt
 
+setup-eval: ## Add the backend-comparison dependencies (pulls torch, ~2GB)
+	$(PIP) install -r requirements-eval.txt
+
 lint: ## Run ruff
-	$(VENV)/bin/ruff check app tests
-	$(VENV)/bin/ruff format --check app tests
+	$(VENV)/bin/ruff check app tests eval
+	$(VENV)/bin/ruff format --check app tests eval
 
 fmt: ## Autoformat
-	$(VENV)/bin/ruff format app tests
-	$(VENV)/bin/ruff check --fix app tests
+	$(VENV)/bin/ruff format app tests eval
+	$(VENV)/bin/ruff check --fix app tests eval
 
 test: ## Run the test suite
 	$(PY) -m pytest -q
 
 cov: ## Run tests with a coverage floor
 	$(PY) -m pytest -q --cov=app --cov-report=term-missing --cov-fail-under=90
+
+index: ## Build the runbook search index
+	$(PY) -m app.rag.index build --backend lsa
+
+eval: index ## Score retrieval and enforce the quality floor
+	$(PY) -m eval.run_eval --backend lsa --fail-under-recall3 0.90 --fail-under-mrr 0.80
+
+eval-compare: ## Score every embedding backend (needs setup-eval)
+	$(PY) -m eval.run_eval --compare
+
+eval-plot: ## Render eval/report.json to a chart
+	$(PY) -m eval.plot_report
 
 run: ## Run the app locally on :5000
 	$(PY) -m app.main
