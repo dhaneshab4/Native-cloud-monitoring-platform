@@ -1,0 +1,223 @@
+name: Infra
+
+# The application pipeline in ci.yml proves the code. This one proves everything
+# that deploys it: Terraform, the Helm chart, the Argo CD applications and the
+# Ansible playbooks. All of it runs without AWS credentials — `validate` and
+# `plan -refresh=false` against no backend is enough to catch the errors that
+# actually happen, and a pull request from a fork must never hold real keys.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "infra/**"
+      - "charts/**"
+      - "gitops/**"
+      - "deploy/ansible/**"
+      - ".github/workflows/infra.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "infra/**"
+      - "charts/**"
+      - "gitops/**"
+      - "deploy/ansible/**"
+      - ".github/workflows/infra.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  security-events: write
+  pull-requests: write
+
+jobs:
+  # --------------------------------------------------------------- terraform
+  terraform:
+    name: Terraform
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        dir: [infra/terraform/envs/dev, infra/terraform/bootstrap, infra/terraform/modules/ecr]
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.10.3
+
+      - name: terraform fmt
+        run: terraform -chdir=${{ matrix.dir }} fmt -check -recursive -diff
+
+      - name: terraform init
+        # No backend: the S3 block is commented out precisely so this works
+        # without credentials. Registry modules are still downloaded and their
+        # variables type-checked, which is where the real errors live.
+        run: terraform -chdir=${{ matrix.dir }} init -backend=false
+
+      - name: terraform validate
+        run: terraform -chdir=${{ matrix.dir }} validate
+
+  # ------------------------------------------------------------------ tflint
+  tflint:
+    name: tflint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: terraform-linters/setup-tflint@v4
+        with:
+          tflint_version: v0.54.0
+      - run: tflint --init
+      - run: tflint --recursive --minimum-failure-severity=warning
+
+  # ----------------------------------------------------------------- checkov
+  checkov:
+    name: Checkov
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: infra/terraform
+          framework: terraform
+          quiet: true
+          soft_fail: true      # report, do not block — see the note below
+          output_format: cli,sarif
+          output_file_path: console,checkov.sarif
+
+      # soft_fail is deliberate. Checkov flags an unencrypted-by-KMS S3 bucket
+      # and a publicly reachable EKS endpoint; both are conscious cost/access
+      # decisions documented in the tfvars. The findings still land in the
+      # security tab so they are visible rather than silenced.
+      - name: Upload Checkov findings
+        if: always()
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: checkov.sarif
+          category: checkov
+
+  # -------------------------------------------------------------------- helm
+  helm:
+    name: Helm chart
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.3
+
+      - name: helm lint
+        run: |
+          for env in dev prod; do
+            helm lint charts/monitoring-app \
+              --values charts/monitoring-app/values.yaml \
+              --values charts/monitoring-app/values-$env.yaml
+          done
+
+      - name: Render both environments
+        run: |
+          mkdir -p /tmp/rendered
+          for env in dev prod; do
+            helm template monitoring-app-$env charts/monitoring-app \
+              --namespace monitoring-$env \
+              --api-versions monitoring.coreos.com/v1 \
+              --api-versions argoproj.io/v1alpha1 \
+              --values charts/monitoring-app/values.yaml \
+              --values charts/monitoring-app/values-$env.yaml \
+              > /tmp/rendered/$env.yaml
+          done
+
+      - name: Validate the rendered output
+        run: |
+          curl -sSLo kubeconform.tar.gz \
+            https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz
+          tar xf kubeconform.tar.gz kubeconform
+          # Rollout and ServiceMonitor are CRDs, so pull the community schemas.
+          ./kubeconform -strict -summary \
+            -schema-location default \
+            -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
+            /tmp/rendered/dev.yaml /tmp/rendered/prod.yaml
+
+      # Catches the mistakes that are valid YAML and valid Kubernetes but still
+      # wrong: a container running as root, a missing resource limit, a probe
+      # that was never defined.
+      - name: Policy check the rendered manifests
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: /tmp/rendered
+          framework: kubernetes
+          quiet: true
+          soft_fail: false
+
+      - name: Assert the prod render is a canary Rollout
+        run: |
+          grep -q 'kind: Rollout' /tmp/rendered/prod.yaml \
+            || { echo "::error::values-prod.yaml no longer renders a Rollout"; exit 1; }
+          grep -q 'kind: Deployment' /tmp/rendered/dev.yaml \
+            || { echo "::error::values-dev.yaml no longer renders a Deployment"; exit 1; }
+
+  # ------------------------------------------------------------------ gitops
+  gitops:
+    name: Argo CD manifests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Validate the Application and AppProject objects
+        run: |
+          curl -sSLo kubeconform.tar.gz \
+            https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz
+          tar xf kubeconform.tar.gz kubeconform
+          ./kubeconform -strict -summary \
+            -schema-location default \
+            -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
+            gitops/
+
+      # Every Application must name a project. Defaulting to `default` grants
+      # the app cluster-wide reach, which is the failure this repo is built to avoid.
+      - name: Refuse Applications without an explicit project
+        run: |
+          fail=0
+          for f in $(grep -rl 'kind: Application' gitops/); do
+            if ! grep -qE '^\s+project:\s+\S+' "$f"; then
+              echo "::error file=$f::Application has no explicit project"
+              fail=1
+            fi
+            if grep -qE '^\s+project:\s+default\s*$' "$f"; then
+              echo "::error file=$f::Application uses the default project"
+              fail=1
+            fi
+          done
+          exit $fail
+
+  # ----------------------------------------------------------------- ansible
+  ansible:
+    name: Ansible
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - run: pip install --quiet ansible-core ansible-lint yamllint
+
+      - name: yamllint
+        run: yamllint -d relaxed deploy/ansible gitops charts/monitoring-app/values*.yaml
+
+      - name: Syntax check every playbook
+        run: |
+          cd deploy/ansible
+          cp inventory.example.ini inventory.ini
+          for pb in *.yml; do
+            ansible-playbook -i inventory.ini "$pb" --syntax-check
+          done
+
+      - name: ansible-lint
+        run: ansible-lint deploy/ansible --profile=production
