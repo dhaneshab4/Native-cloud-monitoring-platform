@@ -1,0 +1,19 @@
+# cp terraform.tfvars.example terraform.tfvars   (terraform.tfvars is gitignored)
+
+region             = "eu-west-1"
+environment        = "dev"
+cluster_name       = "monitoring-dev"
+kubernetes_version = "1.31"
+
+# Cost controls. A cluster on these settings runs roughly $110-150/month, most
+# of which is the EKS control plane ($73) and the NAT gateway (~$35). Destroy it
+# when you are not actively using it — `terraform destroy` takes about 15 minutes.
+node_capacity_type = "SPOT"
+node_desired_size  = 2
+node_max_size      = 4
+single_nat_gateway = true
+az_count           = 2
+
+# Narrow this to your own address before applying. Leaving it open exposes the
+# Kubernetes API server to the internet.
+# cluster_public_access_cidrs = ["203.0.113.10/32"]
