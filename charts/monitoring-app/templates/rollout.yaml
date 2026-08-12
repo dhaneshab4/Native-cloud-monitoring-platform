@@ -1,0 +1,66 @@
+{{- if .Values.rollout.enabled }}
+# Canary delivery without a service mesh: Argo Rollouts shifts traffic by
+# adjusting the replica ratio behind a single Service, which is accurate enough
+# for weighted rollout and needs no Istio/Linkerd dependency.
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: {{ include "monitoring-app.fullname" . }}
+  labels:
+    {{- include "monitoring-app.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      {{- include "monitoring-app.selectorLabels" . | nindent 6 }}
+  strategy:
+    canary:
+      # Keep one extra pod during the rollout rather than taking one away, so
+      # capacity never dips below the declared replica count mid-deploy.
+      maxSurge: 1
+      maxUnavailable: 0
+      {{- if .Values.rollout.analysis.enabled }}
+      analysis:
+        startingStep: 1
+        templates:
+          - templateName: {{ include "monitoring-app.fullname" . }}-success-rate
+      {{- end }}
+      steps:
+        {{- toYaml .Values.rollout.steps | nindent 8 }}
+  template:
+    metadata:
+      labels:
+        {{- include "monitoring-app.labels" . | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+    spec:
+      {{- include "monitoring-app.podSpec" . | nindent 6 }}
+{{- if .Values.rollout.analysis.enabled }}
+---
+# Queries Prometheus between canary steps and aborts the rollout automatically
+# if the new pods are erroring. Without this, a canary is just a slow bad deploy.
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: {{ include "monitoring-app.fullname" . }}-success-rate
+  labels:
+    {{- include "monitoring-app.labels" . | nindent 4 }}
+spec:
+  metrics:
+    - name: success-rate
+      interval: 30s
+      count: 4
+      successCondition: result[0] >= {{ .Values.rollout.analysis.successRate }}
+      failureLimit: 1
+      provider:
+        prometheus:
+          address: http://kube-prometheus-stack-prometheus.observability.svc:9090
+          query: |
+            sum(rate(flask_http_request_total{status!~"5..",kubernetes_pod_name=~"{{ include "monitoring-app.fullname" . }}.*"}[2m]))
+            /
+            sum(rate(flask_http_request_total{kubernetes_pod_name=~"{{ include "monitoring-app.fullname" . }}.*"}[2m]))
+{{- end }}
+{{- end }}

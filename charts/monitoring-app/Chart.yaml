@@ -1,0 +1,18 @@
+apiVersion: v2
+name: monitoring-app
+description: Host metrics over HTTP, JSON and Prometheus — packaged for GitOps delivery
+type: application
+
+# version  — the chart's own version, bumped when templates change.
+# appVersion — the default application image tag, overridden per environment by
+#              CI so that a release is a values change, not a chart change.
+version: 0.1.0
+appVersion: "latest"
+
+keywords: [monitoring, prometheus, observability, gitops]
+home: https://github.com/dhaneshab4/CI-CD-pipeline
+sources:
+  - https://github.com/dhaneshab4/CI-CD-pipeline
+maintainers:
+  - name: Dhanesha Balasubramanian
+    url: https://github.com/dhaneshab4

@@ -1,0 +1,28 @@
+# Dev: single replica, reachable from the host on a kind cluster, chatty logs.
+# Deliberately still non-root and read-only — hardening is not the thing you
+# turn off to make development convenient.
+
+replicaCount: 1
+
+image:
+  pullPolicy: Always   # dev tracks the latest build
+
+service:
+  type: NodePort
+  nodePort: 30080      # mapped to localhost:8080 by local/kind-cluster.yaml
+
+config:
+  LOG_LEVEL: "DEBUG"
+  CPU_WARN_PERCENT: "70"
+
+resources:
+  requests: {cpu: 25m, memory: 64Mi}
+  limits: {cpu: 250m, memory: 192Mi}
+
+podDisruptionBudget:
+  enabled: false       # meaningless at one replica, and it blocks node drains
+
+topologySpreadEnabled: false
+
+rollout:
+  enabled: false

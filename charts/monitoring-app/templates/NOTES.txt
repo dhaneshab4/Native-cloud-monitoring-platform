@@ -1,0 +1,19 @@
+{{ .Chart.Name }} {{ .Chart.Version }} deployed as "{{ .Release.Name }}" in namespace "{{ .Release.Namespace }}".
+
+Image:    {{ include "monitoring-app.image" . }}
+Delivery: {{ if .Values.rollout.enabled }}Argo Rollouts canary ({{ len .Values.rollout.steps }} steps){{ else }}RollingUpdate (maxUnavailable={{ .Values.strategy.maxUnavailable }}){{ end }}
+Replicas: {{ if .Values.autoscaling.enabled }}{{ .Values.autoscaling.minReplicas }}–{{ .Values.autoscaling.maxReplicas }} (HPA on {{ .Values.autoscaling.targetCPUUtilizationPercentage }}% CPU){{ else }}{{ .Values.replicaCount }} (fixed){{ end }}
+
+Reach the app:
+{{- if eq .Values.service.type "NodePort" }}
+  http://localhost:8080        (kind maps nodePort {{ .Values.service.nodePort }} to the host)
+{{- else }}
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "monitoring-app.fullname" . }} 8080:{{ .Values.service.port }}
+  http://localhost:8080
+{{- end }}
+
+Check it is healthy:
+  kubectl -n {{ .Release.Namespace }} rollout status {{ if .Values.rollout.enabled }}rollout{{ else }}deployment{{ end }}/{{ include "monitoring-app.fullname" . }}
+{{- if .Values.rollout.enabled }}
+  kubectl argo rollouts get rollout {{ include "monitoring-app.fullname" . }} -n {{ .Release.Namespace }} --watch
+{{- end }}

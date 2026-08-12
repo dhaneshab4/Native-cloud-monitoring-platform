@@ -1,0 +1,31 @@
+{{- if and .Values.serviceMonitor.enabled (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1") }}
+# Rendered only when the Prometheus Operator CRDs are actually present.
+#
+# The capability check is load-bearing, not defensive: `helm install` against a
+# cluster without the CRD fails outright with "no matches for kind
+# ServiceMonitor", taking the whole release with it. Under Argo CD the sync
+# wave installs kube-prometheus-stack first, so by the time this renders the
+# CRD exists and the object ships.
+#
+# `helm template` with no cluster reports no API versions, so CI passes
+# --api-versions monitoring.coreos.com/v1 explicitly to keep validating it.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "monitoring-app.fullname" . }}
+  labels:
+    {{- include "monitoring-app.labels" . | nindent 4 }}
+    {{- with .Values.serviceMonitor.additionalLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "monitoring-app.selectorLabels" . | nindent 6 }}
+  namespaceSelector:
+    matchNames: [{{ .Release.Namespace }}]
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: {{ .Values.serviceMonitor.interval }}
+{{- end }}

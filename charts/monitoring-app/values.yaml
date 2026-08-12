@@ -1,0 +1,95 @@
+# Defaults are the production-shaped ones. Environments override downward
+# (dev makes things cheaper and more permissive), never upward — so a missing
+# override degrades to the safe setting rather than the loose one.
+
+replicaCount: 2
+
+image:
+  repository: ghcr.io/dhaneshab4/cloud-native-monitoring-app
+  tag: ""            # empty means "use .Chart.AppVersion"; CI sets this to a digest-pinned tag
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}    # e.g. eks.amazonaws.com/role-arn for IRSA
+
+# ---------------------------------------------------------------- delivery
+# rollout.enabled swaps the Deployment for an Argo Rollouts Rollout with a
+# canary strategy. Left off, the chart renders a plain Deployment and has no
+# dependency on the Rollouts controller — so `helm template` still validates
+# on a cluster that has never heard of Argo.
+rollout:
+  enabled: false
+  steps:
+    - setWeight: 20
+    - pause: {duration: 30s}
+    - setWeight: 50
+    - pause: {duration: 30s}
+    - setWeight: 100
+  # Abort the rollout automatically if the canary's own error rate degrades.
+  analysis:
+    enabled: false
+    successRate: 0.95
+
+strategy:
+  maxUnavailable: 0   # never drop below the current replica count
+  maxSurge: 1
+
+service:
+  type: ClusterIP
+  port: 80
+  nodePort: null      # only honoured when type is NodePort
+
+config:
+  CPU_WARN_PERCENT: "80"
+  MEM_WARN_PERCENT: "80"
+  DISK_WARN_PERCENT: "85"
+  LOG_LEVEL: "INFO"
+
+resources:
+  requests: {cpu: 50m, memory: 96Mi}
+  limits: {cpu: 500m, memory: 256Mi}
+
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 6
+  targetCPUUtilizationPercentage: 70
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+serviceMonitor:
+  enabled: true
+  interval: 15s
+  # Matches the release label kube-prometheus-stack looks for by default.
+  additionalLabels: {}
+
+# Hardening. These are defaults rather than options on purpose: an environment
+# that needs to relax them has to say so explicitly in its values file.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  fsGroup: 10001
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# Spread replicas across nodes so losing one node cannot take the service down.
+topologySpreadEnabled: true
