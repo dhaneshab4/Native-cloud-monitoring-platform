@@ -1,0 +1,33 @@
+# The app-of-apps root. This is the only object applied by hand — everything
+# else in the cluster arrives because this Application points at gitops/apps/
+# and Argo CD reconciles what it finds there.
+#
+#   kubectl apply -f gitops/bootstrap/argocd-project.yaml
+#   kubectl apply -f gitops/bootstrap/root-app.yaml
+#
+# After that, adding a component is a pull request, not a kubectl command.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: root
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: monitoring
+  source:
+    repoURL: https://github.com/dhaneshab4/CI-CD-pipeline.git
+    targetRevision: main
+    path: gitops/apps
+    directory:
+      recurse: true
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true      # a file deleted in Git is deleted in the cluster
+      selfHeal: true   # a manual kubectl edit is reverted on the next reconcile
+    syncOptions:
+      - CreateNamespace=true
+      - ApplyOutOfSyncOnly=true

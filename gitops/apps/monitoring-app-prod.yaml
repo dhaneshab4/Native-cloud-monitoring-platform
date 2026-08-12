@@ -1,0 +1,43 @@
+# Prod is deliberately NOT automated. The image tag in values-prod.yaml is
+# advanced by a pull request from CI; a human merges it and syncs. Everything
+# is still declarative and auditable — the gate is review, not a console.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: monitoring-app-prod
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+  annotations:
+    argocd.argoproj.io/sync-wave: "20"
+spec:
+  project: monitoring
+  source:
+    repoURL: https://github.com/dhaneshab4/CI-CD-pipeline.git
+    targetRevision: main
+    path: charts/monitoring-app
+    helm:
+      releaseName: monitoring-app-prod
+      valueFiles:
+        - values.yaml
+        - values-prod.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring-prod
+  syncPolicy:
+    # No `automated:` block — sync is manual, via UI, CLI or the Jenkins
+    # promotion stage. selfHeal would fight a canary mid-rollout anyway.
+    syncOptions:
+      - CreateNamespace=true
+      - PrunePropagationPolicy=foreground
+    retry:
+      limit: 3
+      backoff: {duration: 15s, factor: 2, maxDuration: 5m}
+  # A canary rollout is progressing for minutes at a time; without this Argo
+  # reports the app as degraded while it is in fact working as designed.
+  ignoreDifferences:
+    - group: argoproj.io
+      kind: Rollout
+      jsonPointers:
+        - /spec/replicas
+  revisionHistoryLimit: 10

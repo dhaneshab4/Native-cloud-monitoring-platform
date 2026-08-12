@@ -1,0 +1,40 @@
+# Dev tracks main and heals itself. Anything a human does to this namespace by
+# hand is reverted, which is the behaviour you want in the environment people
+# are most tempted to hand-patch.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: monitoring-app-dev
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+  annotations:
+    argocd.argoproj.io/sync-wave: "10"
+spec:
+  project: monitoring
+  source:
+    repoURL: https://github.com/dhaneshab4/CI-CD-pipeline.git
+    targetRevision: main
+    path: charts/monitoring-app
+    helm:
+      releaseName: monitoring-app-dev
+      valueFiles:
+        - values.yaml
+        - values-dev.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring-dev
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - PrunePropagationPolicy=foreground
+    retry:
+      limit: 5
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 3m
+  revisionHistoryLimit: 5

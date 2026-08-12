@@ -1,0 +1,64 @@
+# Prometheus Operator, Prometheus, Alertmanager and Grafana. Sync wave 0 so the
+# ServiceMonitor CRD exists before the application charts ship ServiceMonitors.
+#
+# Deliberately sized for a laptop kind cluster. On EKS, raise retention and give
+# Prometheus a real PVC with the gp3 StorageClass Terraform creates.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: kube-prometheus-stack
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+spec:
+  project: monitoring
+  source:
+    repoURL: https://prometheus-community.github.io/helm-charts
+    chart: kube-prometheus-stack
+    targetRevision: 68.3.0
+    helm:
+      releaseName: kube-prometheus-stack
+      values: |
+        crds:
+          enabled: true
+        prometheus:
+          prometheusSpec:
+            retention: 7d
+            # Empty selectors mean "watch every namespace" rather than only
+            # objects carrying this release's label — otherwise the app's
+            # ServiceMonitor in another namespace is silently ignored.
+            serviceMonitorSelectorNilUsesHelmValues: false
+            ruleSelectorNilUsesHelmValues: false
+            resources:
+              requests: {cpu: 100m, memory: 512Mi}
+              limits: {cpu: 1000m, memory: 2Gi}
+        grafana:
+          enabled: true
+          adminPassword: admin   # local only — use External Secrets on EKS
+          service:
+            type: NodePort
+            nodePort: 30082
+          sidecar:
+            dashboards:
+              enabled: true
+              label: grafana_dashboard
+              searchNamespaces: ALL
+        alertmanager:
+          alertmanagerSpec:
+            resources:
+              requests: {cpu: 25m, memory: 128Mi}
+              limits: {cpu: 200m, memory: 256Mi}
+        # Node-level exporters are noise on a kind cluster and fail on Docker
+        # Desktop's VM. Turn them back on for EKS.
+        nodeExporter: {enabled: false}
+        kubeStateMetrics: {enabled: true}
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: observability
+  syncPolicy:
+    automated: {prune: true, selfHeal: true}
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

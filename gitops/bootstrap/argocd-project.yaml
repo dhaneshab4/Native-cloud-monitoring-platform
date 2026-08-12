@@ -1,0 +1,53 @@
+# An AppProject is the blast radius. Without one, every Application runs with
+# cluster-admin against any repo — which defeats the point of putting delivery
+# behind Git review in the first place.
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: monitoring
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  description: Cloud-native monitoring platform and its supporting stack
+
+  # Only this repository may define applications in this project.
+  sourceRepos:
+    - https://github.com/dhaneshab4/CI-CD-pipeline.git
+    - https://prometheus-community.github.io/helm-charts
+    - https://argoproj.github.io/argo-helm
+
+  destinations:
+    - namespace: monitoring-dev
+      server: https://kubernetes.default.svc
+    - namespace: monitoring-prod
+      server: https://kubernetes.default.svc
+    - namespace: observability
+      server: https://kubernetes.default.svc
+    - namespace: argo-rollouts
+      server: https://kubernetes.default.svc
+
+  # Cluster-scoped resources have to be listed explicitly; anything not named
+  # here is refused even if the Application asks for it.
+  clusterResourceWhitelist:
+    - {group: "", kind: Namespace}
+    - {group: apiextensions.k8s.io, kind: CustomResourceDefinition}
+    - {group: rbac.authorization.k8s.io, kind: ClusterRole}
+    - {group: rbac.authorization.k8s.io, kind: ClusterRoleBinding}
+    - {group: admissionregistration.k8s.io, kind: MutatingWebhookConfiguration}
+    - {group: admissionregistration.k8s.io, kind: ValidatingWebhookConfiguration}
+
+  namespaceResourceBlacklist:
+    - {group: "", kind: ResourceQuota}
+    - {group: "", kind: LimitRange}
+
+  syncWindows:
+    # No automated production syncs on Friday evenings or over the weekend.
+    # Manual sync is still possible; this only stops the controller acting
+    # unattended when nobody is around to notice it going wrong.
+    - kind: deny
+      schedule: "0 18 * * 5"
+      duration: 60h
+      applications:
+        - monitoring-app-prod
+      manualSync: true
