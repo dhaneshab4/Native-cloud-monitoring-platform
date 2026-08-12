@@ -18,6 +18,11 @@ spec:
     - https://argoproj.github.io/argo-helm
 
   destinations:
+    # The root app-of-apps writes Application objects into argocd itself, so
+    # this namespace has to be allowed or the root Application is rejected
+    # outright with InvalidSpecError and nothing downstream is ever created.
+    - namespace: argocd
+      server: https://kubernetes.default.svc
     - namespace: monitoring-dev
       server: https://kubernetes.default.svc
     - namespace: monitoring-prod

@@ -47,6 +47,36 @@ Dev self-heals and prunes automatically. Prod requires a manual sync — the
 promotion gate is a human, and the sync window in the AppProject blocks
 unattended weekend syncs regardless.
 
+## Behind an HTTP proxy
+
+On a network where pods have no working DNS and all egress goes through a
+proxy, the repo-server cannot clone and every Application sits at
+`ComparisonError: ... dial tcp: lookup github.com ... server misbehaving`.
+
+Argo CD's git client honours the standard proxy variables, so the fix is to set
+them on the three components that talk out. `NO_PROXY` matters as much as the
+other two — without it the in-cluster gRPC between the controller, repo-server
+and Redis is sent to the proxy as well, and Argo fails in a much more confusing
+way than a plain clone failure.
+
+```bash
+kubectl -n argocd set env \
+  deploy/argocd-repo-server \
+  statefulset/argocd-application-controller \
+  deploy/argocd-server \
+  HTTP_PROXY=http://<proxy-host>:<port> \
+  HTTPS_PROXY=http://<proxy-host>:<port> \
+  NO_PROXY=localhost,127.0.0.1,10.96.0.0/12,10.244.0.0/16,.svc,.cluster.local
+
+kubectl -n argocd annotate application root \
+  argocd.argoproj.io/refresh=hard --overwrite
+```
+
+The kind nodes need the same treatment at creation time — export `HTTP_PROXY`,
+`HTTPS_PROXY` and `NO_PROXY` before `kind create cluster` and kind writes them
+into each node's containerd config, without which the kubelet cannot pull
+images either.
+
 ## Verifying the GitOps loop actually works
 
 The demonstration that matters is not that it deploys, but that it *corrects*:
