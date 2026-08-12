@@ -8,7 +8,7 @@
   vars:
     app_dir: /opt/monitoring-app
     app_user: monitoring
-    repo_url: https://github.com/dhaneshab4/CI-CD-pipeline.git
+    repo_url: https://github.com/dhaneshab4/cloud-native-monitoring-platform.git
     repo_version: main
 
   tasks:

@@ -22,7 +22,7 @@ provider "aws" {
       Project     = "cloud-native-monitoring"
       Environment = var.environment
       ManagedBy   = "terraform"
-      Repository  = "github.com/dhaneshab4/CI-CD-pipeline"
+      Repository  = "github.com/dhaneshab4/cloud-native-monitoring-platform"
     }
   }
 }

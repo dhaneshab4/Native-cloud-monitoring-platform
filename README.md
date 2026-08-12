@@ -1,6 +1,6 @@
 # Cloud Native Monitoring — build, test, ship, run
 
-[![CI/CD](https://github.com/dhaneshab4/CI-CD-pipeline/actions/workflows/ci.yml/badge.svg)](https://github.com/dhaneshab4/CI-CD-pipeline/actions/workflows/ci.yml)
+[![CI/CD](https://github.com/dhaneshab4/cloud-native-monitoring-platform/actions/workflows/ci.yml/badge.svg)](https://github.com/dhaneshab4/cloud-native-monitoring-platform/actions/workflows/ci.yml)
 
 A small Python service that reports host metrics over HTTP, JSON and Prometheus,
 plus the entire platform that builds, ships and runs it. The service is
@@ -9,9 +9,14 @@ multi-stage image, the CI/CD pipeline, the supply-chain hardening, the
 Terraform-provisioned AWS estate, and the GitOps loop that keeps the cluster
 matching `main`.
 
-| GitOps reconciliation | Canary rollout | Observability |
+![Grafana dashboard](docs/img/grafana-dashboard.png)
+
+*Provisioned Grafana dashboard — ten panels, no manual configuration. Brought up
+with `make up`.*
+
+| Application | Prometheus targets | Alert rules |
 | --- | --- | --- |
-| ![Argo CD](docs/img/argocd-tree.png) | ![Canary](docs/img/rollout-canary.png) | ![Grafana](docs/img/grafana-dashboard.png) |
+| ![App](docs/img/app-dashboard.png) | ![Targets](docs/img/prometheus-targets.png) | ![Alerts](docs/img/prometheus-alerts.png) |
 
 **Terraform** provisions VPC, EKS, ECR and IRSA. **Argo CD** owns everything
 running on the cluster. **GitHub Actions** and **Jenkins** build and prove the
@@ -133,7 +138,7 @@ appear valid. The digest cannot.
 
 ```bash
 cosign verify ghcr.io/dhaneshab4/cloud-native-monitoring-app:latest \
-  --certificate-identity-regexp 'https://github.com/dhaneshab4/CI-CD-pipeline/.*' \
+  --certificate-identity-regexp 'https://github.com/dhaneshab4/cloud-native-monitoring-platform/.*' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
 

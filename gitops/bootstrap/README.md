@@ -99,7 +99,7 @@ metadata:
     argocd.argoproj.io/secret-type: repository
 stringData:
   type: git
-  url: https://github.com/dhaneshab4/CI-CD-pipeline.git
+  url: https://github.com/dhaneshab4/cloud-native-monitoring-platform.git
   proxy: http://<proxy-host>:<port>
 ```
 

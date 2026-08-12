@@ -13,7 +13,7 @@ metadata:
 spec:
   project: monitoring
   source:
-    repoURL: https://github.com/dhaneshab4/CI-CD-pipeline.git
+    repoURL: https://github.com/dhaneshab4/cloud-native-monitoring-platform.git
     targetRevision: main
     path: charts/monitoring-app
     helm:

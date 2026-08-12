@@ -202,7 +202,7 @@ pipeline {
               git config user.name  "jenkins"
               git add charts/monitoring-app/values-dev.yaml
               git commit -m "chore(dev): promote ${IMAGE_TAG} [skip ci]" || exit 0
-              git push https://${GH_TOKEN}@github.com/dhaneshab4/CI-CD-pipeline.git HEAD:main
+              git push https://${GH_TOKEN}@github.com/dhaneshab4/cloud-native-monitoring-platform.git HEAD:main
             '''
           }
         }
@@ -238,11 +238,11 @@ pipeline {
             string(credentialsId: 'argocd-auth-token', variable: 'ARGOCD_AUTH_TOKEN')]) {
             sh '''
               # The approval gate can sit for hours; main may have moved on.
-              git pull --rebase https://${GH_TOKEN}@github.com/dhaneshab4/CI-CD-pipeline.git main
+              git pull --rebase https://${GH_TOKEN}@github.com/dhaneshab4/cloud-native-monitoring-platform.git main
               yq -i '.image.tag = strenv(IMAGE_TAG)' charts/monitoring-app/values-prod.yaml
               git add charts/monitoring-app/values-prod.yaml
               git commit -m "chore(prod): promote ${IMAGE_TAG}"
-              git push https://${GH_TOKEN}@github.com/dhaneshab4/CI-CD-pipeline.git HEAD:main
+              git push https://${GH_TOKEN}@github.com/dhaneshab4/cloud-native-monitoring-platform.git HEAD:main
 
               argocd app sync monitoring-app-prod --grpc-web --timeout 600
               # Canary steps take minutes; wait for the Rollout to finish rather
