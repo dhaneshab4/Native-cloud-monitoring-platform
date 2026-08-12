@@ -1,0 +1,28 @@
+# A three-node local cluster so the GitOps path can be exercised — and
+# screenshotted — without an AWS bill. Everything that runs on EKS runs here;
+# only the Terraform layer differs.
+#
+#   kind create cluster --config local/kind-cluster.yaml
+#
+# Port 30080 is mapped to the host so the app is reachable at localhost:8080
+# via the NodePort service that values-dev.yaml turns on.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: monitoring
+nodes:
+  - role: control-plane
+    kubeadmConfigPatches:
+      - |
+        kind: InitConfiguration
+        nodeRegistration:
+          kubeletExtraArgs:
+            node-labels: "ingress-ready=true"
+    extraPortMappings:
+      - containerPort: 30080   # app
+        hostPort: 8080
+        protocol: TCP
+      - containerPort: 30081   # argocd server
+        hostPort: 8081
+        protocol: TCP
+  - role: worker
+  - role: worker

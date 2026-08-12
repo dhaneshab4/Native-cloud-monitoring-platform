@@ -3,9 +3,21 @@
 [![CI/CD](https://github.com/dhaneshab4/CI-CD-pipeline/actions/workflows/ci.yml/badge.svg)](https://github.com/dhaneshab4/CI-CD-pipeline/actions/workflows/ci.yml)
 
 A small Python service that reports host metrics over HTTP, JSON and Prometheus,
-plus the pipeline and deployment machinery around it. The service is deliberately
-simple; the point of the repository is everything else — the multi-stage image,
-the CI/CD pipeline, the observability stack and the three deployment paths.
+plus the entire platform that builds, ships and runs it. The service is
+deliberately simple; the point of the repository is everything else — the
+multi-stage image, the CI/CD pipeline, the supply-chain hardening, the
+Terraform-provisioned AWS estate, and the GitOps loop that keeps the cluster
+matching `main`.
+
+| GitOps reconciliation | Canary rollout | Observability |
+| --- | --- | --- |
+| ![Argo CD](docs/img/argocd-tree.png) | ![Canary](docs/img/rollout-canary.png) | ![Grafana](docs/img/grafana-dashboard.png) |
+
+**Terraform** provisions VPC, EKS, ECR and IRSA. **Argo CD** owns everything
+running on the cluster. **GitHub Actions** and **Jenkins** build and prove the
+artifact but never touch the cluster — the deploy is a commit, and Argo CD
+converges. See [docs/architecture.md](docs/architecture.md) for why that split
+is the whole point.
 
 ```
                   ┌──────────────┐   scrape /metrics   ┌──────────────┐
@@ -128,9 +140,82 @@ cosign verify ghcr.io/dhaneshab4/cloud-native-monitoring-app:latest \
 Dependabot watches pip, Docker base images and the Actions themselves, grouped
 so it opens one PR per ecosystem rather than a dozen.
 
+## The platform
+
+### Infrastructure — Terraform
+
+`infra/terraform/` provisions the AWS side. `bootstrap/` creates the versioned,
+encrypted S3 bucket and DynamoDB lock table for state, and is the one stack
+applied by hand. `envs/dev/` then builds the estate:
+
+| | |
+| --- | --- |
+| **VPC** | Public/private subnets across 2–3 AZs, single NAT by default (~£30/mo cheaper), subnets tagged so the load balancer controller can discover them |
+| **EKS** | Managed node group on spot by default, gp3 encrypted root volumes, `api` and `audit` control-plane logs, addons for CoreDNS, kube-proxy, VPC CNI, pod identity and the EBS CSI driver |
+| **ECR** | `IMMUTABLE` tags, scan-on-push, lifecycle policy expiring untagged layers after 7 days and keeping the last 20 releases |
+| **IAM** | IRSA roles for the EBS CSI driver, External Secrets and the app itself — no static keys anywhere |
+
+The app's IRSA role starts with **no permissions**. That is deliberate: additions
+become reviewable diffs rather than a role that quietly accumulates access.
+
+```bash
+make tf-init && make tf-plan     # no credentials needed for fmt/validate in CI
+make tf-apply                    # ~$110-150/month; destroy when idle
+```
+
+### Delivery — Argo CD
+
+`gitops/` holds an app-of-apps. Two `kubectl apply` commands bootstrap a cluster
+(see [gitops/bootstrap/README.md](gitops/bootstrap/README.md)); after that,
+adding a component is a pull request.
+
+| Application | Namespace | Sync |
+| --- | --- | --- |
+| `kube-prometheus-stack` | `observability` | automated, self-healing |
+| `argo-rollouts` | `argo-rollouts` | automated, self-healing |
+| `monitoring-app-dev` | `monitoring-dev` | automated, prune + self-heal |
+| `monitoring-app-prod` | `monitoring-prod` | **manual** — the gate is a human |
+
+An `AppProject` scopes the blast radius: only this repo and two upstream chart
+repos are permitted as sources, destinations are restricted to four namespaces,
+and cluster-scoped kinds are whitelisted explicitly. A sync window blocks
+unattended production syncs from Friday evening through the weekend.
+
+The demonstration that matters is not that it deploys but that it **corrects**:
+
+```bash
+make selfheal   # scales dev to 5 by hand; Argo puts it back to 1 within ~60s
+```
+
+### Packaging — Helm
+
+`charts/monitoring-app/` replaces the raw manifests with one chart and two values
+files. The pod spec lives in a single `_helpers.tpl` template shared by both the
+Deployment and the Rollout, so the two delivery modes cannot drift apart.
+
+`rollout.enabled` swaps a plain Deployment for an Argo Rollouts canary. Dev
+renders a Deployment; prod renders a Rollout stepping 10% → 34% → 67% → 100%
+with an optional Prometheus success-rate analysis that aborts the rollout
+automatically. Without that analysis a canary is just a slow bad deploy.
+
+```bash
+make helm-lint     # both environments
+make helm-diff     # what actually differs between dev and prod
+```
+
+### Jenkins
+
+`Jenkinsfile` runs the same gates as GitHub Actions, then does the one thing
+Actions deliberately does not: it writes the promotion commit. Build → scan →
+sign → attest → bump `values-dev.yaml` → wait for Argo to converge → **manual
+approval** → bump `values-prod.yaml` → watch the canary finish.
+
+The deploy stage is a `git commit`, not a `kubectl apply`. So the cluster state
+is whatever `main` says, even when Jenkins is offline.
+
 ## Deployment
 
-Three paths, all in `deploy/`.
+Four paths, all in `deploy/` and `charts/`.
 
 **Containers** — `docker compose up -d`. Prometheus and Grafana are provisioned
 from files — datasource *and* a ten-panel dashboard — so the stack comes up with
@@ -170,16 +255,34 @@ scrape spike does not page anyone.
 ```
 app/            config.py  metrics.py  main.py  templates/
 tests/          22 tests — API contracts, collection, config failure modes
+
+infra/terraform/
+  bootstrap/                        S3 state bucket + DynamoDB lock (applied once, by hand)
+  modules/ecr/                      immutable tags, scan-on-push, lifecycle policy
+  envs/dev/                         VPC + EKS + ECR + IRSA roles
+
+charts/monitoring-app/              Helm: Deployment or Rollout, HPA, PDB, ServiceMonitor
+  values.yaml values-dev.yaml values-prod.yaml
+
+gitops/
+  bootstrap/                        AppProject + app-of-apps root
+  apps/                             Prometheus stack, Rollouts, app per environment
+
 deploy/
   prometheus.yml  alerts.yml        scrape config and five alert rules
   grafana/                          provisioned datasource + 10-panel dashboard
   monitoring-app.service            hardened systemd unit
-  ansible/                          host provisioning playbook
-  k8s/                              kustomize: deployment, service, PDB, ServiceMonitor
-.github/        workflows/ci.yml  dependabot.yml
+  ansible/  playbook.yml            host provisioning
+            ops-host.yml            pinned DevOps toolchain for a build host
+  k8s/                              kustomize (the pre-Helm path, kept working)
+
+local/kind-cluster.yaml             3-node local cluster, ports mapped to the host
+.github/workflows/  ci.yml          app: lint, test, validate, build, sign, integrate
+                    infra.yml       platform: terraform, tflint, checkov, helm, gitops, ansible
+Jenkinsfile                         the same gates, plus the promotion commit
+docs/           architecture.md  screenshots.md  img/
 Dockerfile      multi-stage, non-root, healthchecked
-docker-compose.yml
-Makefile        setup lint fmt test cov run build scan up down logs clean
+Makefile        make help
 ```
 
 ## Local development
@@ -193,7 +296,38 @@ make build      # build the image
 make scan       # Trivy, HIGH and CRITICAL only
 make k8s        # kubectl apply -k deploy/k8s/
 make k8s-check  # kubeconform, the same check CI runs
+make verify     # everything CI checks, locally
 ```
+
+### Running the whole platform locally
+
+The full GitOps loop runs on a laptop for free. Only the Terraform layer needs
+AWS; everything above it is identical on `kind`.
+
+```bash
+make tools      # kind, kubectl, helm, terraform, argocd, yq, kubeconform
+make platform   # kind cluster + Argo CD + the app-of-apps root
+make argo-ui    # https://localhost:8081  (password: make argo-password)
+```
+
+Give the root application a few minutes — it installs the Prometheus operator
+and the Rollouts controller before the app itself, ordered by sync wave.
+
+| | |
+| --- | --- |
+| App | http://localhost:8080 |
+| Argo CD | https://localhost:8081 |
+| Grafana | NodePort 30082 |
+
+```bash
+make selfheal        # scale by hand, watch Argo CD revert it
+make rollout-watch   # follow the production canary
+make kind-down       # tear it all down
+```
+
+`make tools` uses Homebrew. If it fails on permissions, either
+`sudo chown -R $(whoami) /opt/homebrew` or install the binaries directly from
+each project's releases page.
 
 ## Licence
 

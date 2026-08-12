@@ -7,3 +7,29 @@ __pycache__/
 coverage.xml
 .env
 deploy/ansible/inventory.ini
+
+# Terraform
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+*.tfplan
+crash.log
+crash.*.log
+*.tfvars
+!*.tfvars.example
+.terraformrc
+terraform.rc
+# .terraform.lock.hcl is deliberately NOT ignored — it pins provider versions
+# and hashes, and CI must resolve the same providers you did locally.
+
+# Ansible
+deploy/ansible/inventory.ini
+*.retry
+
+# Kubernetes / Helm
+kubeconfig
+charts/**/charts/
+charts/**/*.tgz
+
+# Screenshots are committed on purpose; scratch captures are not
+docs/img/scratch/
