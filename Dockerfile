@@ -1,11 +1,9 @@
 # syntax=docker/dockerfile:1.7
 #
-# Three stages. Build tooling never reaches the runtime image: the builder
-# compiles wheels into a virtualenv, the indexer produces the search artefact,
-# and the runtime copies only those two results.
-#
-# psutil needs a C toolchain to build, which would otherwise ship gcc to
-# production for no reason.
+# Two stages so build tooling never reaches the runtime image: the builder
+# compiles wheels into a virtualenv, the runtime copies only that venv. psutil
+# needs a C toolchain to build, which would otherwise ship gcc to production
+# for no reason.
 
 # ---------------------------------------------------------------- build stage
 FROM python:3.14-slim AS builder
@@ -24,24 +22,11 @@ COPY requirements.txt .
 RUN python -m venv /opt/venv \
     && /opt/venv/bin/pip install --no-cache-dir -r requirements.txt
 
-# -------------------------------------------------------------- indexer stage
-# The runbook index is built here rather than at container start. Building it
-# at boot would mean the artefact CI measured is not the one answering queries,
-# and would add startup latency to every replica. Building it here makes the
-# index and the corpus impossible to get out of sync: they are produced from
-# the same layer.
-FROM builder AS indexer
-
-WORKDIR /src
-COPY app ./app
-COPY deploy/runbooks ./deploy/runbooks
-RUN /opt/venv/bin/python -m app.rag.index build --backend lsa --out /src/data/index.npz
-
 # -------------------------------------------------------------- runtime stage
 FROM python:3.14-slim AS runtime
 
 LABEL org.opencontainers.image.title="cloud-native-monitoring-app" \
-      org.opencontainers.image.description="Host metrics and semantic runbook search over HTTP, JSON and Prometheus" \
+      org.opencontainers.image.description="Host metrics over HTTP, JSON and Prometheus" \
       org.opencontainers.image.source="https://github.com/dhaneshab4/CI-CD-pipeline" \
       org.opencontainers.image.licenses="MIT"
 
@@ -57,8 +42,6 @@ RUN groupadd --gid 10001 appuser \
 
 WORKDIR /app
 COPY --chown=appuser:appuser app ./app
-COPY --chown=appuser:appuser deploy/runbooks ./deploy/runbooks
-COPY --from=indexer --chown=appuser:appuser /src/data/index.npz ./data/index.npz
 
 USER appuser
 EXPOSE 5000

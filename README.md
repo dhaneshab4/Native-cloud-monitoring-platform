@@ -53,9 +53,6 @@ make down
 | --- | --- |
 | `/` | Dashboard; polls the JSON API, no build step, dark mode |
 | `/api/metrics` | JSON snapshot. Returns **503** when a threshold is breached |
-| `/api/search?q=` | Semantic search over the runbooks |
-| `/api/triage` | POST an alert, get the runbooks most likely to resolve it |
-| `/api/alertmanager` | Alertmanager webhook — attaches runbooks to firing alerts |
 | `/metrics` | Prometheus exposition format |
 | `/healthz` | Liveness — is the process answering |
 | `/readyz` | Readiness — can it *actually* collect a metric |
@@ -247,105 +244,11 @@ packages, service account, checkout, virtualenv, unit file, enable, and then
 polls `/readyz` until it answers 200. Handlers mean a re-run only restarts the
 service if something actually changed.
 
-## Runbook retrieval
-
-An alert tells you *what* broke. The runbook tells you what to do about it, and
-finding the right one at 03:00 by grepping a docs folder is its own small
-outage. `/api/triage` takes an alert and returns the procedures most likely to
-resolve it.
-
-```bash
-curl -s localhost:5000/api/search?q=no+space+left+on+device | jq '.results[0].doc_id'
-# "disk-full"
-
-curl -s -XPOST localhost:5000/api/triage \
-  -H 'content-type: application/json' \
-  -d '{"alert":"DiskAlmostFull","detail":"system_disk_percent 91 on /"}' | jq '.confident'
-# true
-```
-
-The twelve runbooks in `deploy/runbooks/` are chunked by markdown section —
-Symptoms, Diagnosis, Resolution — because the author's own structure is a better
-boundary than a fixed token window, and it means a hit points at a specific part
-of a document rather than the whole thing.
-
-**It declines to guess.** Below a similarity floor, results are dropped
-entirely; below a confidence threshold, they are returned but flagged. During an
-incident a plausible wrong answer is worse than no answer, because it gets acted
-on.
-
-### Closing the loop
-
-Searching manually is still a manual step. `/api/alertmanager` is an
-Alertmanager webhook: every firing alert gets the runbook attached to it
-*before* the notification goes out, so nobody has to remember to ask.
-
-```
-alert fires → Alertmanager → /api/alertmanager → notification carries the runbook
-```
-
-`deploy/alertmanager.yml` has the routing. Resolved alerts pass through
-untouched — nobody needs a procedure for something that has stopped happening —
-and a `TargetDown` inhibit rule suppresses the resource alerts of a host that
-cannot be scraped, because those are absence of data, not signal.
-
-### Is a transformer worth it?
-
-The embedding backend is pluggable, and which one ships was decided by
-measurement rather than by taste.
-
-![Retrieval quality](eval/retrieval-quality.png)
-
-| | recall@1 | recall@3 | MRR | p95 latency | image cost |
-| --- | --- | --- | --- | --- | --- |
-| **LSA** (TF-IDF + SVD, numpy) | 81.8% | **97.0%** | 0.891 | **0.09 ms** | none |
-| Transformer (MiniLM) | **90.9%** | **97.0%** | **0.947** | 26.90 ms | ~2 GB |
-
-The transformer is genuinely better at putting the right answer *first*. But
-**recall@3 is identical**, and the UI shows three results — so on the metric
-that matches how the feature is actually used, the two are indistinguishable.
-For that, the transformer costs roughly 300× the p95 latency and two orders of
-magnitude more dependency weight.
-
-**LSA ships.** The transformer stays in `requirements-eval.txt`, and the moment
-recall@3 diverges the decision gets revisited — which is what the eval harness
-is for.
-
-### The index is a build artefact
-
-It is built in a dedicated Docker stage, checksummed, and loaded at boot — never
-regenerated at start-up. Rebuilding on boot would mean the artefact CI measured
-is not the one answering queries. The corpus fingerprint travels with it, so
-`rag_index_stale` goes to 1 when the runbooks change without a rebuild, and an
-alert fires rather than the service quietly answering from an old corpus.
-
-Search degrades independently: a missing or corrupt index disables the two
-search routes and leaves host metrics working.
-
-### Quality gates
-
-`eval/golden.json` holds 33 query→runbook pairs written the way an engineer
-would actually type them, deliberately avoiding the runbook's own wording —
-matching on shared vocabulary would measure nothing.
-
-```
-make eval        # fails the build under recall@3 0.90 or MRR 0.80
-make eval-compare  # score every backend (needs make setup-eval)
-```
-
-This is the coverage floor applied to a model. `--cov-fail-under=90` stops
-untested code reaching main; `--fail-under-recall3` stops a retrieval regression
-reaching main. Neither question is answerable by reading the diff.
-
 ## Alerting
 
 `deploy/alerts.yml` — high CPU, high memory, disk almost full, application
 self-reported degraded, and target down. All have a `for:` duration so a single
 scrape spike does not page anyone.
-
-A second group covers retrieval: a stale index, sustained low match scores
-(either a content gap in the runbooks or a regression — both worth knowing), and
-p95 search latency above 500 ms.
 
 ## Layout
 

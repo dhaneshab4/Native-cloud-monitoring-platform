@@ -36,30 +36,3 @@ groups:
         labels: {severity: critical}
         annotations:
           summary: "Prometheus cannot scrape the monitoring app"
-
-  - name: retrieval
-    rules:
-      - alert: RunbookIndexStale
-        expr: rag_index_stale == 1
-        for: 10m
-        labels: {severity: warning}
-        annotations:
-          summary: "Runbook index does not match the runbooks on disk"
-          description: "Search is answering from an outdated corpus. Rebuild and redeploy."
-
-      - alert: RetrievalQualityDropping
-        expr: avg_over_time(rag_top_score[30m]) < 0.2 and rate(rag_queries_total[30m]) > 0
-        for: 15m
-        labels: {severity: warning}
-        annotations:
-          summary: "Best-match scores have been low for 30 minutes"
-          description: >-
-            Either people are asking about things the runbooks do not cover, which is a
-            content gap, or retrieval has regressed. Both are worth knowing about.
-
-      - alert: RetrievalSlow
-        expr: histogram_quantile(0.95, sum by (le) (rate(rag_query_duration_seconds_bucket[5m]))) > 0.5
-        for: 5m
-        labels: {severity: warning}
-        annotations:
-          summary: "Runbook search p95 above 500ms"

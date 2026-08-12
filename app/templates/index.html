@@ -42,29 +42,6 @@
   .alerts{margin-top:16px;border-left:3px solid var(--bad);
           background:color-mix(in srgb,var(--bad) 10%,transparent);
           padding:10px 14px;border-radius:0 8px 8px 0;font-size:14px}
-  .search{margin-top:22px}
-  .search h2{font-size:14px;margin:0 0 4px;font-weight:650}
-  .search .hint{color:var(--muted);font-size:12.5px;margin:0 0 10px}
-  .search form{display:flex;gap:8px;flex-wrap:wrap}
-  .search input{flex:1 1 320px;min-width:0;padding:10px 12px;border-radius:9px;
-    border:1px solid var(--line);background:var(--panel);color:var(--text);font-size:14px}
-  .search input:focus{outline:2px solid var(--accent);outline-offset:1px;border-color:transparent}
-  .search button{padding:10px 18px;border-radius:9px;border:0;background:var(--accent);
-    color:#fff;font-size:14px;font-weight:600;cursor:pointer;transition:filter .15s ease}
-  .search button:hover{filter:brightness(1.1)}
-  .search button:disabled{opacity:.55;cursor:default}
-  .hits{list-style:none;margin:14px 0 0;padding:0;display:grid;gap:10px}
-  .hit{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
-  .hit-top{display:flex;gap:10px;align-items:baseline;justify-content:space-between}
-  .hit-title{font-weight:600;font-size:14px}
-  .hit-sec{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.05em}
-  .hit-score{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
-  .hit p{margin:6px 0 0;font-size:13.5px;color:var(--muted);line-height:1.55}
-  .empty{color:var(--muted);font-size:13.5px;margin-top:12px}
-  .chips{display:flex;gap:7px;flex-wrap:wrap;margin-top:10px}
-  .chip{background:transparent;border:1px solid var(--line);color:var(--muted);
-    border-radius:999px;padding:4px 11px;font-size:12.5px;cursor:pointer}
-  .chip:hover{border-color:var(--accent);color:var(--accent)}
   .links{margin-top:22px;display:flex;gap:14px;flex-wrap:wrap;font-size:13px}
   .links a{color:var(--accent);text-decoration:none}
   .links a:hover{text-decoration:underline}
@@ -115,29 +92,8 @@
     <strong>Threshold breached:</strong> <span id="alert-text">{{ snapshot.breaches | join('; ') }}</span>
   </div>
 
-  {% if search_enabled %}
-  <section class="search">
-    <h2>Runbook search</h2>
-    <p class="hint">Describe the problem in your own words — it matches on meaning, not keywords.</p>
-    <form id="search-form" autocomplete="off">
-      <input id="q" type="search" placeholder="e.g. no space left on device"
-             aria-label="Search the runbooks">
-      <button type="submit">Search</button>
-    </form>
-    <div class="chips">
-      <button type="button" class="chip">pod stuck in crashloopbackoff</button>
-      <button type="button" class="chip">graphs have flatlined</button>
-      <button type="button" class="chip">a credential was exposed</button>
-      <button type="button" class="chip">the release we just shipped broke production</button>
-    </div>
-    <ul id="hits" class="hits"></ul>
-    <p id="no-hits" class="empty" hidden>Nothing matched closely enough to be worth showing.</p>
-  </section>
-  {% endif %}
-
   <div class="links">
     <a href="/api/metrics">/api/metrics</a>
-    {% if search_enabled %}<a href="/api/search?q=disk+is+full">/api/search</a>{% endif %}
     <a href="/metrics">/metrics</a>
     <a href="/healthz">/healthz</a>
     <a href="/readyz">/readyz</a>
@@ -179,46 +135,6 @@
   }
   setInterval(tick, INTERVAL);
   tick();
-
-  // ------------------------------------------------------------- runbooks
-  const form = document.getElementById('search-form');
-  if (form) {
-    const input = document.getElementById('q');
-    const list = document.getElementById('hits');
-    const none = document.getElementById('no-hits');
-    const button = form.querySelector('button');
-    const escape = (t) => { const d = document.createElement('div'); d.textContent = t; return d.innerHTML; };
-
-    async function runSearch(query) {
-      if (!query.trim()) return;
-      button.disabled = true;
-      try {
-        const r = await fetch('/api/search?k=4&q=' + encodeURIComponent(query));
-        const d = await r.json();
-        list.innerHTML = (d.results || []).map((h) => `
-          <li class="hit">
-            <div class="hit-top">
-              <span><span class="hit-title">${escape(h.title)}</span>
-                    <span class="hit-sec"> · ${escape(h.section)}</span></span>
-              <span class="hit-score">${h.score.toFixed(3)}</span>
-            </div>
-            <p>${escape(h.excerpt)}</p>
-          </li>`).join('');
-        none.hidden = (d.results || []).length > 0;
-      } catch (e) {
-        console.error('search failed', e);
-        list.innerHTML = '';
-        none.hidden = false;
-      } finally {
-        button.disabled = false;
-      }
-    }
-
-    form.addEventListener('submit', (e) => { e.preventDefault(); runSearch(input.value); });
-    document.querySelectorAll('.chip').forEach((chip) => {
-      chip.addEventListener('click', () => { input.value = chip.textContent; runSearch(chip.textContent); });
-    });
-  }
 </script>
 </body>
 </html>

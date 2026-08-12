@@ -92,57 +92,11 @@ jobs:
             -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json' \
             deploy/k8s/
 
-  # ----------------------------------------------------------- model quality
-  # The same idea as the coverage floor, applied to retrieval. A change to the
-  # runbooks, the chunker, the tokeniser or the backend can quietly make search
-  # worse, and no amount of reading the diff will tell you. This measures it.
-  eval:
-    name: Retrieval quality gate
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.12"
-          cache: pip
-      - run: pip install -r requirements-dev.txt
-      - name: Score retrieval against the golden set
-        run: |
-          python -m eval.run_eval --backend lsa \
-            --fail-under-recall3 0.90 \
-            --fail-under-mrr 0.80
-      - name: Publish the eval report
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: eval-report
-          path: eval/report.json
-      - name: Summarise on the run page
-        if: always()
-        run: |
-          python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
-          import json, pathlib
-          p = pathlib.Path("eval/report.json")
-          if not p.exists():
-              print("### Retrieval quality\n\nNo report produced.")
-              raise SystemExit
-          r = json.loads(p.read_text())["results"][0]
-          print("### Retrieval quality\n")
-          print(f"Backend `{r['backend']}` over {r['documents']} runbooks, {r['cases']} queries.\n")
-          print("| metric | value |")
-          print("| --- | --- |")
-          print(f"| recall@1 | {r['recall@1']:.1%} |")
-          print(f"| recall@3 | {r['recall@3']:.1%} |")
-          print(f"| recall@5 | {r['recall@5']:.1%} |")
-          print(f"| MRR | {r['mrr']:.4f} |")
-          print(f"| latency p95 | {r['latency_ms_p95']:.2f} ms |")
-          PY
-
   # -------------------------------------------------------------------- build
   build:
     name: Build image
     runs-on: ubuntu-latest
-    needs: [lint, test, validate-config, validate-manifests, eval]
+    needs: [lint, test, validate-config, validate-manifests]
     permissions:
       contents: read
       packages: write
@@ -200,9 +154,6 @@ jobs:
           curl -fsS http://localhost:5000/readyz | grep -q ready
           curl -fsS http://localhost:5000/metrics | grep -q system_cpu_percent
           curl -fsS http://localhost:5000/api/metrics | grep -q cpu_percent
-          echo "checking the baked-in runbook index is present and serving"
-          curl -fsS 'http://localhost:5000/api/search?q=no+space+left+on+device' | grep -q disk-full
-          curl -fsS http://localhost:5000/metrics | grep -q rag_index_documents
           echo "checking the container runs as non-root"
           test "$(docker exec smoke id -u)" = "10001"
           docker rm -f smoke

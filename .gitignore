@@ -33,8 +33,3 @@ charts/**/*.tgz
 
 # Screenshots are committed on purpose; scratch captures are not
 docs/img/scratch/
-
-# Build artefacts: the search index is produced by `make index` and by the
-# Dockerfile indexer stage, never committed.
-data/
-eval/report.json
