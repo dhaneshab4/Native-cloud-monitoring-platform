@@ -13,7 +13,7 @@ spec:
 
   # Only this repository may define applications in this project.
   sourceRepos:
-    - https://github.com/dhaneshab4/cloud-native-monitoring-platform.git
+    - https://github.com/dhaneshab4/Native-cloud-monitoring-platform.git
     - https://prometheus-community.github.io/helm-charts
     - https://argoproj.github.io/argo-helm
 

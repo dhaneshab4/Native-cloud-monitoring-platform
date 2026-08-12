@@ -8,7 +8,7 @@
 
 [Unit]
 Description=Cloud native monitoring app
-Documentation=https://github.com/dhaneshab4/cloud-native-monitoring-platform
+Documentation=https://github.com/dhaneshab4/Native-cloud-monitoring-platform
 After=network-online.target
 Wants=network-online.target
 

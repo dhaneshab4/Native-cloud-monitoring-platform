@@ -10,9 +10,9 @@ version: 0.1.0
 appVersion: "latest"
 
 keywords: [monitoring, prometheus, observability, gitops]
-home: https://github.com/dhaneshab4/cloud-native-monitoring-platform
+home: https://github.com/dhaneshab4/Native-cloud-monitoring-platform
 sources:
-  - https://github.com/dhaneshab4/cloud-native-monitoring-platform
+  - https://github.com/dhaneshab4/Native-cloud-monitoring-platform
 maintainers:
   - name: Dhanesha Balasubramanian
     url: https://github.com/dhaneshab4

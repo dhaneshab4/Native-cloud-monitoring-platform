@@ -27,7 +27,7 @@ FROM python:3.14-slim AS runtime
 
 LABEL org.opencontainers.image.title="cloud-native-monitoring-app" \
       org.opencontainers.image.description="Host metrics over HTTP, JSON and Prometheus" \
-      org.opencontainers.image.source="https://github.com/dhaneshab4/cloud-native-monitoring-platform" \
+      org.opencontainers.image.source="https://github.com/dhaneshab4/Native-cloud-monitoring-platform" \
       org.opencontainers.image.licenses="MIT"
 
 ENV PYTHONDONTWRITEBYTECODE=1 \

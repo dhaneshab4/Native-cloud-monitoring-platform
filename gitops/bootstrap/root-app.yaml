@@ -16,7 +16,7 @@ metadata:
 spec:
   project: monitoring
   source:
-    repoURL: https://github.com/dhaneshab4/cloud-native-monitoring-platform.git
+    repoURL: https://github.com/dhaneshab4/Native-cloud-monitoring-platform.git
     targetRevision: main
     path: gitops/apps
     directory:

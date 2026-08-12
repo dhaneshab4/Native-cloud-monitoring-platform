@@ -1,6 +1,6 @@
 # Cloud Native Monitoring — build, test, ship, run
 
-[![CI/CD](https://github.com/dhaneshab4/cloud-native-monitoring-platform/actions/workflows/ci.yml/badge.svg)](https://github.com/dhaneshab4/cloud-native-monitoring-platform/actions/workflows/ci.yml)
+[![CI/CD](https://github.com/dhaneshab4/Native-cloud-monitoring-platform/actions/workflows/ci.yml/badge.svg)](https://github.com/dhaneshab4/Native-cloud-monitoring-platform/actions/workflows/ci.yml)
 
 A small Python service that reports host metrics over HTTP, JSON and Prometheus,
 plus the entire platform that builds, ships and runs it. The service is
@@ -138,7 +138,7 @@ appear valid. The digest cannot.
 
 ```bash
 cosign verify ghcr.io/dhaneshab4/cloud-native-monitoring-app:latest \
-  --certificate-identity-regexp 'https://github.com/dhaneshab4/cloud-native-monitoring-platform/.*' \
+  --certificate-identity-regexp 'https://github.com/dhaneshab4/Native-cloud-monitoring-platform/.*' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 ```
 

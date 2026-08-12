@@ -99,7 +99,7 @@ metadata:
     argocd.argoproj.io/secret-type: repository
 stringData:
   type: git
-  url: https://github.com/dhaneshab4/cloud-native-monitoring-platform.git
+  url: https://github.com/dhaneshab4/Native-cloud-monitoring-platform.git
   proxy: http://<proxy-host>:<port>
 ```
 
